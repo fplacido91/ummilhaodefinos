@@ -7,15 +7,19 @@
 const TARGET_BEERS = 1_000_000;
 const MAPPINGS_STORAGE_KEY = "um-milhao-de-finos-name-mappings";
 const APP_STATE_STORAGE_KEY = "um-milhao-de-finos-app-state-v1";
+const REVIEW_DECISIONS_STORAGE_KEY = "um-milhao-de-finos-review-decisions-v1";
 const REPOSITORY_CHAT_FILE = "WhatsApp Chat with Um Milhão de Finos.txt";
 const REPOSITORY_CONTACTS_FILE = "contacts.csv";
-const numberFormat = new Intl.NumberFormat("en-US");
-const dateFormat = new Intl.DateTimeFormat("en-GB", {
+const REPOSITORY_REVIEW_FILE = "review-decisions.json";
+const REPOSITORY_MEDIA_DIRECTORY = "Media";
+const REVIEW_PAGE_SIZE = 48;
+const numberFormat = new Intl.NumberFormat("pt-PT");
+const dateFormat = new Intl.DateTimeFormat("pt-PT", {
   day: "2-digit",
   month: "short",
   year: "numeric",
 });
-const shortDateFormat = new Intl.DateTimeFormat("en-GB", {
+const shortDateFormat = new Intl.DateTimeFormat("pt-PT", {
   day: "2-digit",
   month: "short",
 });
@@ -24,6 +28,7 @@ const dom = {
   overviewMount: document.getElementById("overviewMount"),
   dailyMount: document.getElementById("dailyMount"),
   participantsMount: document.getElementById("participantsMount"),
+  reviewMount: document.getElementById("reviewMount"),
   importsStatus: document.getElementById("importsStatus"),
   detailMount: document.getElementById("detailMount"),
   mapperDialog: document.getElementById("mapperDialog"),
@@ -38,6 +43,7 @@ const appState = {
   mode: "demo",
   currentView: "overview",
   records: [],
+  photoCandidates: [],
   participants: [],
   contacts: [],
   contactsRestored: false,
@@ -49,12 +55,16 @@ const appState = {
     manualTotal: null,
   },
   importMeta: {
-    chatFileName: "Demo snapshot",
+    chatFileName: "Demonstração",
     contactsFileName: null,
     importedAt: null,
   },
   manualMappings: loadMappings(),
+  reviewDecisions: loadReviewDecisions(),
   selectedDay: null,
+  reviewPage: 1,
+  reviewFilter: "pending",
+  reviewSearch: "",
   selectedParticipant: null,
   detailPage: 1,
   participantSort: "count",
@@ -81,6 +91,10 @@ function formatNumber(value) {
   return value === null || value === undefined || Number.isNaN(value)
     ? "—"
     : numberFormat.format(value);
+}
+
+function formatPercent(value) {
+  return Number(value).toFixed(2).replace(".", ",");
 }
 
 function normalizePhone(value) {
@@ -168,12 +182,12 @@ function dateFromDayKey(dayKey) {
 }
 
 function formatDate(date) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "Unknown date";
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "Data desconhecida";
   return dateFormat.format(date);
 }
 
 function formatShortDate(date) {
-  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "Unknown";
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "Desconhecido";
   return shortDateFormat.format(date);
 }
 
@@ -184,7 +198,7 @@ function formatTime(date, fallback = "—") {
 
 function formatBucketLabel(dayKey, compact = false) {
   const start = dateFromDayKey(dayKey);
-  if (!start) return "Unknown window";
+  if (!start) return "Período desconhecido";
   const end = new Date(start);
   end.setDate(end.getDate() + 1);
   if (compact) return `${formatShortDate(start)} · 08:00`;
@@ -193,15 +207,15 @@ function formatBucketLabel(dayKey, compact = false) {
 
 function formatIdentitySubtitle(participant) {
   if (participant.matchStatus === "mapped") {
-    return `linked · ${participant.member?.name || participant.mappedPhone}`;
+    return `associado · ${participant.member?.name || participant.mappedPhone}`;
   }
   if (participant.matchStatus === "matched") {
-    return participant.member?.name || participant.phone || "phone matched";
+    return participant.member?.name || participant.phone || "telefone associado";
   }
   if (participant.senderType === "phone") {
-    return participant.phone || "phone sender";
+    return participant.phone || "remetente com telefone";
   }
-  return "name identified · needs a phone link";
+  return "nome identificado · falta associar telefone";
 }
 
 function initials(name) {
@@ -219,18 +233,18 @@ function avatarHtml(participant, index = 0, large = false) {
 
 function statusHtml(participant) {
   if (participant.matchStatus === "matched") {
-    return `<span class="status-tag status-matched">Phone matched</span>`;
+    return `<span class="status-tag status-matched">Telefone associado</span>`;
   }
   if (participant.matchStatus === "mapped") {
-    return `<span class="status-tag status-matched">Manually linked</span>`;
+    return `<span class="status-tag status-matched">Associação manual</span>`;
   }
   if (participant.matchStatus === "mapped-unknown") {
-    return `<span class="status-tag status-phone">Phone saved · no roster row</span>`;
+    return `<span class="status-tag status-phone">Telefone guardado · sem contacto</span>`;
   }
   if (participant.matchStatus === "phone-unmatched") {
-    return `<span class="status-tag status-phone">Phone not in CSV</span>`;
+    return `<span class="status-tag status-phone">Telefone ausente no CSV</span>`;
   }
-  return `<span class="status-tag status-name">Name only · unmatched</span>`;
+  return `<span class="status-tag status-name">Apenas nome · pendente</span>`;
 }
 
 function loadMappings() {
@@ -251,6 +265,52 @@ function persistMappings() {
   }
 }
 
+function loadReviewDecisions() {
+  try {
+    const saved = window.localStorage.getItem(REVIEW_DECISIONS_STORAGE_KEY);
+    const parsed = saved ? JSON.parse(saved) : {};
+    return parsed && typeof parsed === "object" ? (parsed.decisions || parsed) : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistReviewDecisions() {
+  try {
+    window.localStorage.setItem(REVIEW_DECISIONS_STORAGE_KEY, JSON.stringify(appState.reviewDecisions));
+  } catch {
+    // Review decisions remain available for this session if storage is disabled.
+  }
+}
+
+function applyReviewDecisions() {
+  if (!appState.photoCandidates.length) return;
+
+  const accepted = [];
+  let duplicateCount = 0;
+  let nonBeerCount = 0;
+  let reviewedCount = 0;
+
+  appState.photoCandidates.forEach((candidate) => {
+    const decision = appState.reviewDecisions[candidate.id] || null;
+    const record = { ...candidate, reviewDecision: decision };
+    if (decision) reviewedCount += 1;
+    if (decision === "non-beer") nonBeerCount += 1;
+
+    const excludeAsDuplicate = candidate.duplicateCandidate && decision !== "beer" && decision !== "non-beer";
+    if (excludeAsDuplicate) duplicateCount += 1;
+    if (!excludeAsDuplicate && decision !== "non-beer" && decision !== "duplicate") accepted.push(record);
+  });
+
+  appState.records = accepted;
+  appState.stats.rawPhotoCount = appState.photoCandidates.length;
+  appState.stats.dedupedCount = accepted.length;
+  appState.stats.duplicateCount = duplicateCount;
+  appState.stats.nonBeerCount = nonBeerCount;
+  appState.stats.reviewedCount = reviewedCount;
+  appState.stats.pendingReviewCount = appState.photoCandidates.length - reviewedCount;
+}
+
 function serializeRecord(record) {
   return {
     id: record.id,
@@ -264,6 +324,9 @@ function serializeRecord(record) {
     timeText: record.timeText,
     dayKey: record.dayKey,
     messageIndex: record.messageIndex,
+    duplicateCandidate: Boolean(record.duplicateCandidate),
+    duplicateGroupId: record.duplicateGroupId || null,
+    reviewDecision: record.reviewDecision || null,
   };
 }
 
@@ -281,7 +344,11 @@ function persistAppState() {
           : null,
       },
       ledger: appState.mode === "imported"
-        ? { records: appState.records.map(serializeRecord), stats: appState.stats }
+        ? {
+            records: appState.records.map(serializeRecord),
+            photoCandidates: appState.photoCandidates.map(serializeRecord),
+            stats: appState.stats,
+          }
         : null,
     };
     window.localStorage.setItem(APP_STATE_STORAGE_KEY, JSON.stringify(snapshot));
@@ -303,7 +370,7 @@ function restoreAppState() {
     }
     if (snapshot.importMeta && typeof snapshot.importMeta === "object") {
       appState.importMeta = {
-        chatFileName: snapshot.importMeta.chatFileName || "Demo snapshot",
+        chatFileName: snapshot.importMeta.chatFileName || "Demonstração",
         contactsFileName: snapshot.importMeta.contactsFileName || null,
         importedAt: snapshot.importMeta.importedAt ? new Date(snapshot.importMeta.importedAt) : null,
       };
@@ -319,12 +386,24 @@ function restoreAppState() {
         dayKey: record.dayKey || dailyBucketKey(timestamp),
       };
     });
+    appState.photoCandidates = (snapshot.ledger.photoCandidates || snapshot.ledger.records).map((record) => {
+      const timestamp = record.timestamp ? new Date(record.timestamp) : null;
+      return {
+        ...record,
+        timestamp,
+        dayKey: record.dayKey || dailyBucketKey(timestamp),
+      };
+    });
     appState.stats = {
       rawPhotoCount: Number(snapshot.ledger.stats?.rawPhotoCount || 0),
       dedupedCount: Number(snapshot.ledger.stats?.dedupedCount || appState.records.length),
       duplicateCount: Number(snapshot.ledger.stats?.duplicateCount || 0),
       manualTotal: snapshot.ledger.stats?.manualTotal ?? null,
+      nonBeerCount: Number(snapshot.ledger.stats?.nonBeerCount || 0),
+      reviewedCount: Number(snapshot.ledger.stats?.reviewedCount || 0),
+      pendingReviewCount: Number(snapshot.ledger.stats?.pendingReviewCount || 0),
     };
+    applyReviewDecisions();
     appState.chatMessages = [];
     return true;
   } catch {
@@ -396,6 +475,7 @@ function parseWhatsAppChat(text) {
   let duplicateCount = 0;
   let lastPhoto = null;
   const records = [];
+  const photoRecords = [];
   const manualTotals = [];
 
   messages.forEach((message, messageIndex) => {
@@ -432,6 +512,7 @@ function parseWhatsAppChat(text) {
       dayKey: dailyBucketKey(message.timestamp),
       messageIndex,
       duplicate: false,
+      duplicateGroupId: null,
     };
 
     // Compare against the immediately previous photo, not the previous line:
@@ -443,6 +524,13 @@ function parseWhatsAppChat(text) {
       lastPhoto.senderKey === photo.senderKey &&
       sameClockMinute(lastPhoto, photo),
     );
+    photo.duplicateCandidate = isDuplicate;
+    if (isDuplicate) {
+      const duplicateGroupId = lastPhoto.duplicateGroupId || `duplicate-group-${lastPhoto.id}`;
+      lastPhoto.duplicateGroupId = duplicateGroupId;
+      photo.duplicateGroupId = duplicateGroupId;
+    }
+    photoRecords.push(photo);
 
     if (isDuplicate) {
       duplicateCount += 1;
@@ -456,10 +544,14 @@ function parseWhatsAppChat(text) {
   return {
     messages,
     records,
+    photoRecords,
     rawPhotoCount,
     duplicateCount,
     dedupedCount: records.length,
-    manualTotal: manualTotals.length ? Math.max(...manualTotals) : null,
+    // The export contains one obvious outlier (4476) in the middle of a
+    // running sequence that continues at 4076. Use the last manual checkpoint
+    // for the sanity-check display instead of the maximum outlier.
+    manualTotal: manualTotals.length ? manualTotals[manualTotals.length - 1] : null,
   };
 }
 
@@ -561,7 +653,7 @@ function parseContactsCsv(text) {
   const headers = rows[0].map(headerKey);
   const phoneIndices = headers
     .map((header, index) => ({ header, index }))
-    .filter(({ header }) => /phone|mobile|tel|telefone|number|numero|whatsapp/.test(header))
+    .filter(({ header }) => /phone|mobile|tel|telefone|number|numero|whatsapp/.test(header) && !/label/.test(header))
     .map(({ index }) => index);
   if (!phoneIndices.length) {
     const inferredPhoneIndex = inferPhoneIndex(rows.slice(1));
@@ -781,31 +873,31 @@ function getDayRows(dayKey) {
 }
 
 function emptyStateHtml(title, body, action = "pick-chat") {
-  return `<div class="empty-state"><div><div class="empty-icon">${icon("beer")}</div><h2>${escapeHtml(title)}</h2><p>${escapeHtml(body)}</p><button class="button button-primary" data-action="${action}">${icon("upload")} Import a chat export</button></div></div>`;
+  return `<div class="empty-state"><div><div class="empty-icon">${icon("beer")}</div><h2>${escapeHtml(title)}</h2><p>${escapeHtml(body)}</p><button class="button button-primary" data-action="${action}">${icon("upload")} Importar uma exportação do chat</button></div></div>`;
 }
 
 function renderImportSummary() {
   if (!appState.justImported && appState.mode !== "imported") return "";
-  const { rawPhotoCount, dedupedCount, manualTotal, duplicateCount } = appState.stats;
+  const { rawPhotoCount, dedupedCount, manualTotal, duplicateCount, nonBeerCount = 0, pendingReviewCount = 0 } = appState.stats;
   const difference = manualTotal === null ? null : manualTotal - dedupedCount;
   const differenceLabel = difference === null ? "—" : `${difference > 0 ? "+" : ""}${formatNumber(difference)}`;
-  const source = appState.importMeta.chatFileName || "WhatsApp export";
+  const source = appState.importMeta.chatFileName || "Exportação do WhatsApp";
   return `
-    <section class="import-summary" aria-label="Post-import summary">
+    <section class="import-summary" aria-label="Resumo após importação">
       <div class="import-summary-header">
         <span class="import-summary-mark">${icon("check")}</span>
         <div>
-          <h3>Fresh import processed</h3>
-          <p>${escapeHtml(source)} · replace-and-recompute complete</p>
+          <h3>Importação concluída · auditoria em curso</h3>
+          <p>${escapeHtml(source)} · substituição e recálculo concluídos</p>
         </div>
       </div>
       <div class="import-summary-values">
-        <div class="import-summary-metric"><span>Beers counted · photos</span><strong>${formatNumber(dedupedCount)}</strong></div>
-        <div class="import-summary-metric"><span>Group's highest manual count</span><strong>${formatNumber(manualTotal)}</strong></div>
-        <div class="import-summary-metric"><span>Difference</span><strong>${differenceLabel}</strong></div>
+        <div class="import-summary-metric"><span>Finos contados · fotografias</span><strong>${formatNumber(dedupedCount)}</strong></div>
+        <div class="import-summary-metric"><span>Último total manual do grupo</span><strong>${formatNumber(manualTotal)}</strong></div>
+        <div class="import-summary-metric"><span>Diferença</span><strong>${differenceLabel}</strong></div>
       </div>
       <div class="dedupe-audit-line">
-        <span>${formatNumber(rawPhotoCount)} image files found</span><span>→</span><strong>${formatNumber(dedupedCount)} counted</strong><span>after removing</span><em>${formatNumber(duplicateCount)} same-minute duplicate record${duplicateCount === 1 ? "" : "s"}</em>
+        <span>${formatNumber(rawPhotoCount)} ficheiros de imagem encontrados</span><span>→</span><strong>${formatNumber(dedupedCount)} contados</strong><span>após remover</span><em>${formatNumber(duplicateCount)} registo${duplicateCount === 1 ? "" : "s"} duplicado${duplicateCount === 1 ? "" : "s"} do mesmo minuto</em>${nonBeerCount ? `<span>· ${formatNumber(nonBeerCount)} não fino${nonBeerCount === 1 ? "" : "s"} excluído${nonBeerCount === 1 ? "" : "s"}</span>` : ""}${pendingReviewCount ? `<span>· ${formatNumber(pendingReviewCount)} por confirmar</span>` : ""}
       </div>
     </section>`;
 }
@@ -813,80 +905,73 @@ function renderImportSummary() {
 function renderOverview() {
   const total = appState.stats.dedupedCount;
   const progress = Math.min(100, (total / TARGET_BEERS) * 100);
-  const topParticipants = appState.participants.slice(0, 6);
-  const latestRecords = [...appState.records]
-    .sort((first, second) => (second.timestamp?.getTime?.() || 0) - (first.timestamp?.getTime?.() || 0))
-    .slice(0, 5);
-  const maxCount = appState.participants[0]?.count || 1;
-  const unmatched = getUnmatchedParticipants();
-
+  const totalRanking = appState.participants.slice(0, 10).map((participant) => ({ participant, count: participant.count }));
+  const dayKeys = [...new Set(appState.records.map((record) => record.dayKey).filter((key) => key !== "unknown"))].sort().reverse();
+  const latestDayKey = dayKeys[0] || null;
+  const latestDayRows = latestDayKey ? getDayRows(latestDayKey) : [];
+  const dailyRanking = latestDayRows.slice(0, 10);
+  const latestDayTotal = latestDayRows.reduce((sum, row) => sum + row.count, 0);
+  const maxTotalCount = totalRanking[0]?.count || 1;
+  const maxDailyCount = dailyRanking[0]?.count || 1;
   if (!appState.records.length) {
-    dom.overviewMount.innerHTML = `${renderImportSummary()}${emptyStateHtml("The ledger is thirsty.", "Import a full WhatsApp .txt export to turn image attachments into one auditable beer per submission.")}`;
+    dom.overviewMount.innerHTML = `${renderImportSummary()}${emptyStateHtml("O registo está com sede.", "Importe uma exportação completa do WhatsApp para transformar anexos de imagem num fino auditável por envio.")}`;
     return;
   }
 
-  const rankingRows = topParticipants
-    .map((participant, index) => `
-      <button class="rank-row" data-action="open-participant" data-id="${escapeHtml(participant.id)}">
-        <span class="rank-number">${String(index + 1).padStart(2, "0")}</span>
-        <span class="person-cell">${avatarHtml(participant, index)}<span class="person-copy"><span class="person-name">${escapeHtml(participant.displayName)}</span><span class="person-subline">${escapeHtml(formatIdentitySubtitle(participant))}</span></span></span>
-        <span class="rank-bar"><span style="width:${Math.max(3, (participant.count / maxCount) * 100)}%"></span></span>
-        <span class="rank-count">${formatNumber(participant.count)} <small>beers</small></span>
-      </button>`)
-    .join("");
-
-  const auditRows = latestRecords.length
-    ? latestRecords
-        .map((record) => `
-          <div class="audit-row">
-            <span class="audit-beer-mark">${icon("beer")}</span>
-            <span class="audit-copy"><strong>${escapeHtml(record.displayName)}</strong><span>${escapeHtml(record.filename)}</span></span>
-            <span class="audit-time">${escapeHtml(formatTime(record.timestamp, record.timeText))}</span>
-          </div>`)
+  const rankingRowsHtml = (rows, maxCount) => rows.length
+    ? rows
+        .map(({ participant, count }, index) => `
+          <button class="rank-row" data-action="open-participant" data-id="${escapeHtml(participant.id)}" title="Abrir detalhe de ${escapeHtml(participant.displayName)}">
+            <span class="rank-number">${String(index + 1).padStart(2, "0")}</span>
+            <span class="person-cell">${avatarHtml(participant, index)}<span class="person-copy"><span class="person-name">${escapeHtml(participant.displayName)}</span></span></span>
+            <span class="rank-bar"><span style="width:${Math.max(3, (count / maxCount) * 100)}%"></span></span>
+            <span class="rank-count">${formatNumber(count)} <small>finos</small></span>
+          </button>`)
         .join("")
-    : `<div class="empty-state"><p>No photo records yet.</p></div>`;
+    : `<div class="ranking-empty">Não há fotografias contadas neste período.</div>`;
+  const totalRankingRows = rankingRowsHtml(totalRanking, maxTotalCount);
+  const dailyRankingRows = rankingRowsHtml(dailyRanking, maxDailyCount);
+  const dailyPeriodLabel = latestDayKey ? formatBucketLabel(latestDayKey, true) : "sem período datado";
 
-  const sourceLabel = appState.mode === "demo" ? "Demo snapshot" : "Imported archive";
-  const sourceDetail = appState.mode === "demo" ? "parser-ready sample data" : appState.importMeta.chatFileName;
-  const unmatchedLabel = unmatched.length ? `${String(unmatched.length).padStart(2, "0")} name-only sender${unmatched.length === 1 ? "" : "s"}` : "All senders resolved";
+  const sourceLabel = appState.mode === "demo" ? "Demonstração" : "Arquivo do grupo";
+  const sourceDetail = appState.mode === "demo" ? "dados de exemplo" : "classificação pública atualizada";
+  const publicMeta = `${formatNumber(appState.participants.length)} participantes · ${formatNumber(dayKeys.length)} períodos diários`;
 
   dom.overviewMount.innerHTML = `
     <div class="overview-meta-line">
-      <span class="dataset-badge"><span class="status-pulse"></span><strong>${escapeHtml(sourceLabel)}</strong> · ${escapeHtml(sourceDetail || "full chat export")}</span>
-      ${appState.justImported ? `<span class="fresh-import-label">Just recomputed · ${escapeHtml(formatDate(appState.importMeta.importedAt))}</span>` : `<span class="fresh-import-label">${escapeHtml(unmatchedLabel)}</span>`}
+      <span class="dataset-badge"><span class="status-pulse"></span><strong>${escapeHtml(sourceLabel)}</strong> · ${escapeHtml(sourceDetail || "exportação completa do chat")}</span>
+      <span class="fresh-import-label">${escapeHtml(publicMeta)}</span>
     </div>
-    ${renderImportSummary()}
     <div class="hero-grid"${appState.justImported || appState.mode === "imported" ? " style=\"margin-top:17px\"" : ""}>
       <article class="hero-card">
-        <div class="hero-card-topline"><span>All-time photo count</span>${icon("arrow-up-right")}</div>
+        <div class="hero-card-topline"><span>Total de finos</span>${icon("arrow-up-right")}</div>
         <div class="hero-number">${formatNumber(total)}<small>/ 1,000,000</small></div>
         <div class="hero-progress"><span style="width:${Math.max(0.42, progress)}%"></span></div>
-        <div class="hero-card-footer"><span><strong>${progress.toFixed(2)}%</strong> of the way there</span><span>one image · one fin</span></div>
+        <div class="hero-card-footer"><span><strong>${formatPercent(progress)}%</strong> do caminho percorrido</span><span>uma imagem · um fino</span></div>
         <div class="hero-stamp">${icon("beer")}</div>
       </article>
       <div class="stat-stack">
-        <article class="summary-card"><div class="summary-card-topline"><span>Image files found</span>${icon("file")}</div><div class="summary-card-value">${formatNumber(appState.stats.rawPhotoCount)}</div><div class="summary-card-foot">before duplicate check</div></article>
-        <article class="summary-card"><div class="summary-card-topline"><span>Counted after dedupe</span>${icon("check")}</div><div class="summary-card-value">${formatNumber(appState.stats.dedupedCount)}</div><div class="summary-card-foot">authoritative total</div></article>
-        <article class="summary-card"><div class="summary-card-topline"><span>Highest manual tally</span>${icon("sliders")}</div><div class="summary-card-value">${formatNumber(appState.stats.manualTotal)}</div><div class="summary-card-foot">sanity check only</div></article>
-        <article class="summary-card"><div class="summary-card-topline"><span>Name-only senders</span>${icon("link")}</div><div class="summary-card-value">${String(unmatched.length).padStart(2, "0")}</div><div class="summary-card-foot">${unmatched.length ? "mapping needed" : "all linked"}</div></article>
+        <article class="summary-card"><div class="summary-card-topline"><span>Finos no arquivo</span>${icon("check")}</div><div class="summary-card-value">${formatNumber(total)}</div><div class="summary-card-foot">contagem atual</div></article>
+        <article class="summary-card"><div class="summary-card-topline"><span>Último período</span>${icon("calendar")}</div><div class="summary-card-value">${formatNumber(latestDayTotal)}</div><div class="summary-card-foot">${escapeHtml(dailyPeriodLabel)}</div></article>
+        <article class="summary-card"><div class="summary-card-topline"><span>Participantes</span>${icon("users")}</div><div class="summary-card-value">${formatNumber(appState.participants.length)}</div><div class="summary-card-foot">classificação total</div></article>
+        <article class="summary-card"><div class="summary-card-topline"><span>Períodos diários</span>${icon("calendar")}</div><div class="summary-card-value">${formatNumber(dayKeys.length)}</div><div class="summary-card-foot">08:00 → 08:00</div></article>
       </div>
     </div>
     <div class="dashboard-lower">
-      <section class="panel-card">
-        <div class="section-card-header"><div><p class="eyebrow">Cumulative ranking</p><h2>Who is carrying the round?</h2></div><button class="view-all" data-action="navigate" data-view="participants">All participants ${icon("arrow-right")}</button></div>
-        <div class="ranking-list">${rankingRows}</div>
+      <section class="panel-card ranking-panel">
+        <div class="section-card-header"><div><p class="eyebrow">Classificação acumulada</p><h2>Ranking total · top 10</h2></div><button class="view-all" data-action="navigate" data-view="participants">Todos os participantes ${icon("arrow-right")}</button></div>
+        <div class="ranking-list">${totalRankingRows}</div>
       </section>
-      <section class="panel-card audit-panel">
-        <div class="section-card-header"><div><p class="eyebrow">Latest traceable records</p><h2>The last few fins</h2></div><button class="view-all" data-action="navigate" data-view="imports">Audit ${icon("arrow-up-right")}</button></div>
-        <div class="audit-list">${auditRows}</div>
-        <div class="audit-footer"><span>Deduped photo messages</span><strong>${formatNumber(appState.stats.dedupedCount)}</strong></div>
+      <section class="panel-card ranking-panel">
+        <div class="section-card-header"><div><p class="eyebrow">Último período · ${escapeHtml(dailyPeriodLabel)}</p><h2>Ranking diário · top 10</h2></div><button class="view-all" data-action="navigate" data-view="daily">Ver contagens diárias ${icon("arrow-up-right")}</button></div>
+        <div class="ranking-list">${dailyRankingRows}</div>
       </section>
     </div>`;
 }
 
 function renderDaily() {
   if (!appState.records.length) {
-    dom.dailyMount.innerHTML = emptyStateHtml("No daily rounds yet.", "Import a chat export and the 08:00-to-08:00 buckets will build themselves.");
+    dom.dailyMount.innerHTML = emptyStateHtml("Ainda não há contagens diárias.", "Importe um chat e os períodos das 08:00 às 08:00 serão criados automaticamente.");
     return;
   }
 
@@ -907,10 +992,10 @@ function renderDaily() {
     .join("");
 
   dom.dailyMount.innerHTML = `
-    <div class="daily-toolbar"><div><h2>${escapeHtml(formatBucketLabel(selectedDay))}</h2><p>The early hours before 08:00 stay with the previous day.</p></div><div class="select-wrap"><label for="daySelect">Choose a day bucket</label><select id="daySelect">${options}</select>${icon("chevron-down")}</div></div>
-    <div class="day-window-card"><div class="window-copy">${icon("calendar")}<div><strong>One group day = 08:00 → next day 08:00</strong><span>${escapeHtml(formatBucketLabel(selectedDay, true))} is the selected window.</span></div></div><div class="day-total"><strong>${formatNumber(total)}</strong><span>beers in this window</span></div></div>
-    <section class="day-chart-card"><div class="chart-heading"><h2>Round leaders</h2><span>Top ${Math.min(rows.length, 8)} of ${rows.length} active senders</span></div><div class="bar-chart">${chartRows || `<p class="page-description">No deduplicated photos landed in this bucket.</p>`}</div></section>
-    <section class="table-card"><div class="section-card-header"><div><p class="eyebrow">Daily ranking</p><h2>Everyone in this window</h2></div><span class="table-eyebrow">${escapeHtml(formatBucketLabel(selectedDay))}</span></div><div class="table-scroll"><table><thead><tr><th>#</th><th>Participant</th><th>Beers</th><th>Identity</th></tr></thead><tbody>${tableRows || `<tr><td colspan="4"><div class="empty-state"><p>No beers in this day bucket.</p></div></td></tr>`}</tbody></table></div><div class="table-footer"><span>${formatNumber(rows.length)} active sender${rows.length === 1 ? "" : "s"}</span><span>Click a row for the full filename log</span></div></section>`;
+    <div class="daily-toolbar"><div><h2>${escapeHtml(formatBucketLabel(selectedDay))}</h2><p>As horas antes das 08:00 pertencem ao dia anterior.</p></div><div class="select-wrap"><label for="daySelect">Escolha um período diário</label><select id="daySelect">${options}</select>${icon("chevron-down")}</div></div>
+    <div class="day-window-card"><div class="window-copy">${icon("calendar")}<div><strong>Um dia do grupo = 08:00 → 08:00 do dia seguinte</strong><span>${escapeHtml(formatBucketLabel(selectedDay, true))} é o período selecionado.</span></div></div><div class="day-total"><strong>${formatNumber(total)}</strong><span>finos neste período</span></div></div>
+    <section class="day-chart-card"><div class="chart-heading"><h2>Líderes do período</h2><span>Os ${Math.min(rows.length, 8)} principais de ${rows.length} remetentes ativos</span></div><div class="bar-chart">${chartRows || `<p class="page-description">Não há fotografias deduplicadas neste período.</p>`}</div></section>
+    <section class="table-card"><div class="section-card-header"><div><p class="eyebrow">Classificação diária</p><h2>Todos neste período</h2></div><span class="table-eyebrow">${escapeHtml(formatBucketLabel(selectedDay))}</span></div><div class="table-scroll"><table><thead><tr><th>#</th><th>Participante</th><th>Finos</th><th>Identidade</th></tr></thead><tbody>${tableRows || `<tr><td colspan="4"><div class="empty-state"><p>Não há finos neste período.</p></div></td></tr>`}</tbody></table></div><div class="table-footer"><span>${formatNumber(rows.length)} remetente ativo${rows.length === 1 ? "" : "s"}</span><span>Abra uma linha para ver o registo completo de ficheiros</span></div></section>`;
 }
 
 function sortParticipants(participants) {
@@ -928,7 +1013,7 @@ function renderParticipantRows() {
   const query = normalizeName(appState.participantSearch);
   const participants = sortParticipants(appState.participants).filter((participant) => !query || normalizeName(`${participant.displayName} ${participant.phone} ${participant.member?.name || ""}`).includes(query));
   if (!participants.length) {
-    return `<tr><td colspan="4"><div class="empty-state"><p>No participant matches “${escapeHtml(appState.participantSearch)}”.</p></div></td></tr>`;
+    return `<tr><td colspan="4"><div class="empty-state"><p>Nenhum participante corresponde a “${escapeHtml(appState.participantSearch)}”.</p></div></td></tr>`;
   }
   return participants
     .map((participant, index) => `<tr class="clickable-row" data-action="open-participant" data-id="${escapeHtml(participant.id)}"><td class="table-rank">${String(index + 1).padStart(2, "0")}</td><td><button class="table-person-button" data-action="open-participant" data-id="${escapeHtml(participant.id)}">${avatarHtml(participant, index)}<span class="person-copy"><span class="person-name">${escapeHtml(participant.displayName)}</span><span class="person-subline">${escapeHtml(formatIdentitySubtitle(participant))}</span></span></button></td><td class="count-cell">${formatNumber(participant.count)}</td><td>${statusHtml(participant)}</td></tr>`)
@@ -937,14 +1022,14 @@ function renderParticipantRows() {
 
 function renderParticipants() {
   if (!appState.records.length) {
-    dom.participantsMount.innerHTML = emptyStateHtml("No roll call yet.", "Once a chat is imported, every sender with a counted image appears here.");
+    dom.participantsMount.innerHTML = emptyStateHtml("Ainda não há lista de participantes.", "Depois de importar um chat, todos os remetentes com uma imagem contada aparecem aqui.");
     return;
   }
   const unmatched = getUnmatchedParticipants().length;
   dom.participantsMount.innerHTML = `
-    <div class="participants-toolbar"><div><h2>${formatNumber(appState.participants.length)} participant${appState.participants.length === 1 ? "" : "s"}</h2><p>${formatNumber(appState.stats.dedupedCount)} deduplicated photo submissions in the current archive.</p></div><div class="toolbar-tools"><div class="search-wrap"><label for="participantSearch">Find a sender</label>${icon("search")}<input id="participantSearch" type="search" value="${escapeHtml(appState.participantSearch)}" placeholder="Name or phone" /></div><div><label class="select-wrap-label" for="participantSort">Sort</label><select class="sort-select" id="participantSort"><option value="count" ${appState.participantSort === "count" ? "selected" : ""}>Most beers</option><option value="name" ${appState.participantSort === "name" ? "selected" : ""}>Name A–Z</option><option value="status" ${appState.participantSort === "status" ? "selected" : ""}>Identity status</option></select></div></div></div>
-    <div class="contact-note">${icon("info")}<span><strong>${unmatched ? `${unmatched} saved display name${unmatched === 1 ? " remains" : "s remain"} unmatched.` : "Every sender is linked."}</strong> Phone numbers are normalized by digits only; saved contact names are never guessed. Use Resolve names to persist a manual link.</span></div>
-    <section class="table-card"><div class="table-scroll"><table><thead><tr><th>#</th><th>Participant</th><th>Beers</th><th>Identity status</th></tr></thead><tbody id="participantsTableBody">${renderParticipantRows()}</tbody></table></div><div class="table-footer"><span>Sorted by ${appState.participantSort === "count" ? "beer count" : appState.participantSort === "name" ? "name" : "identity status"}</span><span>Click any sender to inspect submissions</span></div></section>`;
+    <div class="participants-toolbar"><div><h2>${formatNumber(appState.participants.length)} participante${appState.participants.length === 1 ? "" : "s"}</h2><p>${formatNumber(appState.stats.dedupedCount)} submissões de fotografias deduplicadas no arquivo atual.</p></div><div class="toolbar-tools"><div class="search-wrap"><label for="participantSearch">Procurar remetente</label>${icon("search")}<input id="participantSearch" type="search" value="${escapeHtml(appState.participantSearch)}" placeholder="Nome ou telefone" /></div><div><label class="select-wrap-label" for="participantSort">Ordenar</label><select class="sort-select" id="participantSort"><option value="count" ${appState.participantSort === "count" ? "selected" : ""}>Mais finos</option><option value="name" ${appState.participantSort === "name" ? "selected" : ""}>Nome A–Z</option><option value="status" ${appState.participantSort === "status" ? "selected" : ""}>Estado da identidade</option></select></div></div></div>
+    <div class="contact-note">${icon("info")}<span><strong>${unmatched ? `${unmatched} nome${unmatched === 1 ? " guardado permanece" : "s guardados permanecem"} pendente${unmatched === 1 ? "" : "s"}.` : "Todos os remetentes estão associados."}</strong> Os números de telefone são normalizados apenas por dígitos; os nomes guardados nunca são adivinhados. Use Associar nomes para guardar uma associação manual.</span></div>
+    <section class="table-card"><div class="table-scroll"><table><thead><tr><th>#</th><th>Participante</th><th>Finos</th><th>Estado da identidade</th></tr></thead><tbody id="participantsTableBody">${renderParticipantRows()}</tbody></table></div><div class="table-footer"><span>Ordenado por ${appState.participantSort === "count" ? "número de finos" : appState.participantSort === "name" ? "nome" : "estado da identidade"}</span><span>Abra um remetente para consultar os envios</span></div></section>`;
 }
 
 function participantDailyTotals(participant) {
@@ -959,7 +1044,7 @@ function participantDailyTotals(participant) {
 function renderDetail() {
   const participant = getParticipantById(appState.selectedParticipant);
   if (!participant) {
-    dom.detailMount.innerHTML = emptyStateHtml("Choose a participant.", "The detail view opens when you click a sender from a ranking.", "navigate");
+    dom.detailMount.innerHTML = emptyStateHtml("Escolha um participante.", "O detalhe abre quando clicar num remetente de uma classificação.", "navigate");
     return;
   }
 
@@ -971,12 +1056,12 @@ function renderDetail() {
   const visibleRecords = sortedRecords.slice(start, start + pageSize);
   const dailyTotals = participantDailyTotals(participant);
   const contactDescription = participant.matchStatus === "name-only"
-    ? "This saved chat display name cannot be safely auto-matched to the CSV."
+    ? "Este nome guardado do chat não pode ser associado automaticamente ao CSV com segurança."
     : participant.matchStatus === "phone-unmatched"
-      ? "The chat number was normalized, but no equal digit string exists in the imported CSV."
+      ? "O número do chat foi normalizado, mas não existe uma sequência de dígitos igual no CSV importado."
       : participant.member
-        ? `Linked contact: ${participant.member.name} · ${participant.member.phoneRaw}`
-        : "This sender has a phone link saved for future imports.";
+        ? `Contacto associado: ${participant.member.name} · ${participant.member.phoneRaw}`
+        : "Este remetente tem uma associação telefónica guardada para futuras importações.";
   const rows = visibleRecords
     .map((record) => `<tr><td>${escapeHtml(record.timestamp ? formatDate(record.timestamp) : record.dateText)}</td><td class="bucket-cell">${escapeHtml(record.timestamp ? formatTime(record.timestamp, record.timeText) : record.timeText)}</td><td class="filename-cell" title="${escapeHtml(record.filename)}">${escapeHtml(record.filename)}</td><td class="bucket-cell">${escapeHtml(formatBucketLabel(record.dayKey, true))}</td></tr>`)
     .join("");
@@ -985,21 +1070,138 @@ function renderDetail() {
     .join("");
 
   dom.detailMount.innerHTML = `
-    <button class="detail-back" data-action="navigate" data-view="participants">${icon("chevron-left")} Back to participants</button>
-    <div class="detail-heading"><div class="detail-person">${avatarHtml(participant, appState.participants.indexOf(participant), true)}<div><p class="eyebrow">Participant detail</p><h1 id="detail-title">${escapeHtml(participant.displayName)}</h1><p>${escapeHtml(formatIdentitySubtitle(participant))}</p>${statusHtml(participant)}</div></div><div class="detail-total"><span>Deduped beers</span><strong>${formatNumber(participant.count)}</strong></div></div>
+    <button class="detail-back" data-action="navigate" data-view="participants">${icon("chevron-left")} Voltar aos participantes</button>
+    <div class="detail-heading"><div class="detail-person">${avatarHtml(participant, appState.participants.indexOf(participant), true)}<div><p class="eyebrow">Detalhe do participante</p><h1 id="detail-title">${escapeHtml(participant.displayName)}</h1><p>${escapeHtml(formatIdentitySubtitle(participant))}</p>${statusHtml(participant)}</div></div><div class="detail-total"><span>Finos deduplicados</span><strong>${formatNumber(participant.count)}</strong></div></div>
     <div class="detail-grid">
-      <section class="detail-log-card"><div class="detail-card-header"><div><h2>Original submissions</h2><p>Every row is one counted IMG attachment.</p></div><span class="mono-note">${formatNumber(participant.count)} total</span></div><div class="table-scroll"><table class="detail-log-table"><thead><tr><th>Date</th><th>Time</th><th>Original filename</th><th>08:00 bucket</th></tr></thead><tbody>${rows}</tbody></table></div><div class="pagination"><p>Showing ${formatNumber(start + 1)}–${formatNumber(Math.min(start + pageSize, sortedRecords.length))} of ${formatNumber(sortedRecords.length)}</p><div class="pagination-actions"><button class="icon-button" data-action="detail-page" data-page="${appState.detailPage - 1}" aria-label="Previous page" ${appState.detailPage <= 1 ? "disabled" : ""}>${icon("chevron-left")}</button><button class="icon-button" data-action="detail-page" data-page="${appState.detailPage + 1}" aria-label="Next page" ${appState.detailPage >= totalPages ? "disabled" : ""}>${icon("arrow-right")}</button></div></div></section>
-      <aside><section class="detail-days-card"><div class="detail-card-header"><div><h2>Beers by day</h2><p>The same 08:00 boundary, per sender.</p></div></div><div class="detail-days-list">${dayRows || `<div class="empty-state"><p>No valid dated records.</p></div>`}</div>${dailyTotals.length > 10 ? `<div class="table-footer"><span>Showing 10 latest windows</span><span>${formatNumber(dailyTotals.length)} total</span></div>` : ""}</section><div class="detail-contact-card"><h3>${participant.matchStatus === "name-only" ? "Name identified, phone unmatched" : "Identity resolution"}</h3><p>${escapeHtml(contactDescription)}</p><button class="button button-outline" data-action="resolve-names">${icon("link")} ${participant.matchStatus === "name-only" ? "Resolve this name" : "Edit mappings"}</button></div></aside>
+      <section class="detail-log-card"><div class="detail-card-header"><div><h2>Envios originais</h2><p>Cada linha corresponde a um anexo IMG contado.</p></div><span class="mono-note">${formatNumber(participant.count)} total</span></div><div class="table-scroll"><table class="detail-log-table"><thead><tr><th>Data</th><th>Hora</th><th>Nome original</th><th>Período das 08:00</th></tr></thead><tbody>${rows}</tbody></table></div><div class="pagination"><p>A mostrar ${formatNumber(start + 1)}–${formatNumber(Math.min(start + pageSize, sortedRecords.length))} de ${formatNumber(sortedRecords.length)}</p><div class="pagination-actions"><button class="icon-button" data-action="detail-page" data-page="${appState.detailPage - 1}" aria-label="Página anterior" ${appState.detailPage <= 1 ? "disabled" : ""}>${icon("chevron-left")}</button><button class="icon-button" data-action="detail-page" data-page="${appState.detailPage + 1}" aria-label="Página seguinte" ${appState.detailPage >= totalPages ? "disabled" : ""}>${icon("arrow-right")}</button></div></div></section>
+      <aside><section class="detail-days-card"><div class="detail-card-header"><div><h2>Finos por dia</h2><p>O mesmo limite das 08:00, por remetente.</p></div></div><div class="detail-days-list">${dayRows || `<div class="empty-state"><p>Não há registos datados válidos.</p></div>`}</div>${dailyTotals.length > 10 ? `<div class="table-footer"><span>A mostrar os 10 períodos mais recentes</span><span>${formatNumber(dailyTotals.length)} no total</span></div>` : ""}</section><div class="detail-contact-card"><h3>${participant.matchStatus === "name-only" ? "Nome identificado, telefone pendente" : "Resolução de identidade"}</h3><p>${escapeHtml(contactDescription)}</p></div></aside>
     </div>`;
+}
+
+function mediaUrl(filename) {
+  return `${REPOSITORY_MEDIA_DIRECTORY}/${encodeURIComponent(filename)}`;
+}
+
+function reviewDecisionLabel(decision) {
+  if (decision === "beer") return "Contar como fino";
+  if (decision === "non-beer") return "Não é fino";
+  if (decision === "duplicate") return "Duplicado";
+  return "Por confirmar";
+}
+
+function isPendingDuplicateCandidate(record) {
+  return Boolean(record.duplicateCandidate) && !appState.reviewDecisions[record.id];
+}
+
+function getDuplicateGroups() {
+  const groups = new Map();
+  appState.photoCandidates.forEach((record) => {
+    if (!record.duplicateGroupId) return;
+    if (!groups.has(record.duplicateGroupId)) groups.set(record.duplicateGroupId, []);
+    groups.get(record.duplicateGroupId).push(record);
+  });
+  return groups;
+}
+
+function getFilteredReviewCandidates() {
+  const query = normalizeName(appState.reviewSearch);
+  return appState.photoCandidates.filter((record) => {
+    const decision = appState.reviewDecisions[record.id] || null;
+    const matchesQuery = !query || normalizeName(`${record.filename} ${record.displayName} ${record.phone}`).includes(query);
+    if (!matchesQuery) return false;
+    if (appState.reviewFilter === "pending") return !decision;
+    if (appState.reviewFilter === "duplicates") return Boolean(record.duplicateGroupId || record.duplicateCandidate);
+    if (appState.reviewFilter === "duplicate") return decision === "duplicate";
+    if (appState.reviewFilter === "reviewed") return Boolean(decision);
+    if (appState.reviewFilter === "beer") return decision === "beer";
+    if (appState.reviewFilter === "non-beer") return decision === "non-beer";
+    return true;
+  });
+}
+
+function getCurrentReviewPageRecords() {
+  const filtered = getFilteredReviewCandidates();
+  const start = (appState.reviewPage - 1) * REVIEW_PAGE_SIZE;
+  return filtered.slice(start, start + REVIEW_PAGE_SIZE);
+}
+
+function collectReviewImages() {
+  return new Map(
+    [...dom.reviewMount.querySelectorAll(".review-card[data-id]")]
+      .map((card) => [card.dataset.id, card.querySelector("img")])
+      .filter(([, image]) => image),
+  );
+}
+
+function hydrateReviewImages(previousImages) {
+  const grid = dom.reviewMount.querySelector(".review-grid");
+  if (!grid) return;
+
+  grid.querySelectorAll(".review-card[data-id]").forEach((card) => {
+    const image = card.querySelector("img");
+    const previousImage = previousImages.get(card.dataset.id);
+    if (!image) return;
+    if (previousImage) {
+      image.replaceWith(previousImage);
+      return;
+    }
+    if (image.dataset.src) {
+      image.src = image.dataset.src;
+      image.removeAttribute("data-src");
+    }
+  });
+}
+
+function renderReview() {
+  if (!appState.photoCandidates.length) {
+    dom.reviewMount.innerHTML = emptyStateHtml("Ainda não há imagens para auditar.", "As imagens do repositório aparecem aqui depois de o chat ser carregado.");
+    return;
+  }
+
+  const previousImages = collectReviewImages();
+  const filtered = getFilteredReviewCandidates();
+  const totalPages = Math.max(1, Math.ceil(filtered.length / REVIEW_PAGE_SIZE));
+  appState.reviewPage = Math.min(Math.max(1, appState.reviewPage), totalPages);
+  const start = (appState.reviewPage - 1) * REVIEW_PAGE_SIZE;
+  const visible = filtered.slice(start, start + REVIEW_PAGE_SIZE);
+  const pendingVisible = visible.filter((record) => !appState.reviewDecisions[record.id]);
+  const reviewed = appState.photoCandidates.filter((record) => appState.reviewDecisions[record.id]).length;
+  const duplicates = appState.photoCandidates.filter(isPendingDuplicateCandidate).length;
+  const confirmedDuplicates = appState.photoCandidates.filter((record) => appState.reviewDecisions[record.id] === "duplicate").length;
+  const nonBeers = appState.photoCandidates.filter((record) => appState.reviewDecisions[record.id] === "non-beer").length;
+  const duplicateGroups = getDuplicateGroups();
+
+  const cards = visible.map((record) => {
+    const decision = appState.reviewDecisions[record.id] || null;
+    const groupMembers = record.duplicateGroupId ? duplicateGroups.get(record.duplicateGroupId) || [] : [];
+    const duplicatePartner = groupMembers.find((member) => member.id !== record.id);
+    const duplicateRole = record.duplicateCandidate
+      ? "Candidato a duplicado automático"
+      : record.duplicateGroupId
+        ? "Original de um par automático"
+        : "";
+    const partnerNote = duplicatePartner ? ` · par: ${duplicatePartner.filename}` : "";
+    const defaultNote = duplicateRole ? `${duplicateRole}${partnerNote}` : "Incluído por defeito";
+    const decisionNote = decision ? `Decisão guardada: ${reviewDecisionLabel(decision)}${partnerNote}` : defaultNote;
+    const stateLabel = decision ? reviewDecisionLabel(decision) : duplicateRole || reviewDecisionLabel(null);
+    const stateClass = decision === "beer" ? "review-state-beer" : decision === "non-beer" ? "review-state-non-beer" : decision === "duplicate" || record.duplicateGroupId || record.duplicateCandidate ? "review-state-duplicate" : "review-state-pending";
+    return `<article class="review-card ${stateClass}" data-id="${escapeHtml(record.id)}">
+      <div class="review-image-wrap"><img data-src="${escapeHtml(mediaUrl(record.filename))}" alt="Pré-visualização de ${escapeHtml(record.filename)}" loading="lazy" decoding="async" /><span class="review-state">${escapeHtml(stateLabel)}</span></div>
+      <div class="review-card-body"><div class="review-card-meta"><strong>${escapeHtml(record.filename)}</strong><span>${escapeHtml(record.dateText)} · ${escapeHtml(record.timeText)}</span></div><p>${escapeHtml(record.displayName)} · ${escapeHtml(decisionNote)}</p><div class="review-actions"><button class="review-action review-action-beer" data-action="review-decision" data-id="${escapeHtml(record.id)}" data-decision="beer">Fino</button><button class="review-action review-action-non-beer" data-action="review-decision" data-id="${escapeHtml(record.id)}" data-decision="non-beer">Não é fino</button><button class="review-action review-action-duplicate" data-action="review-decision" data-id="${escapeHtml(record.id)}" data-decision="duplicate">Duplicado</button>${decision ? `<button class="review-clear" data-action="review-decision" data-id="${escapeHtml(record.id)}" data-decision="">Limpar</button>` : ""}</div></div>
+    </article>`;
+  }).join("");
+
+  dom.reviewMount.innerHTML = `<div class="review-summary"><div><span>Finos contados</span><strong>${formatNumber(appState.stats.dedupedCount)}</strong></div><div><span>Imagens pendentes</span><strong>${formatNumber(appState.photoCandidates.length - reviewed)}</strong></div><div><span>Candidatos a duplicado</span><strong>${formatNumber(duplicates)}</strong></div><div><span>Duplicados confirmados</span><strong>${formatNumber(confirmedDuplicates)}</strong></div><div><span>Excluídas como não fino</span><strong>${formatNumber(nonBeers)}</strong></div></div><div class="review-toolbar"><div><h2>Fila de auditoria</h2><p>Modo rápido: pode marcar as imagens desta página como finos antes de avançar. As imagens já vistas não são recarregadas.</p></div><div class="review-tools"><div class="search-wrap"><label for="reviewSearch">Procurar ficheiro ou remetente</label>${icon("search")}<input id="reviewSearch" type="search" value="${escapeHtml(appState.reviewSearch)}" placeholder="IMG-... ou nome" /></div><select class="sort-select" id="reviewFilter" aria-label="Filtrar auditoria"><option value="pending" ${appState.reviewFilter === "pending" ? "selected" : ""}>Pendentes</option><option value="duplicates" ${appState.reviewFilter === "duplicates" ? "selected" : ""}>Pares candidatos a duplicado</option><option value="duplicate" ${appState.reviewFilter === "duplicate" ? "selected" : ""}>Marcadas como duplicado</option><option value="reviewed" ${appState.reviewFilter === "reviewed" ? "selected" : ""}>Com decisão</option><option value="beer" ${appState.reviewFilter === "beer" ? "selected" : ""}>Marcadas como fino</option><option value="non-beer" ${appState.reviewFilter === "non-beer" ? "selected" : ""}>Marcadas como não fino</option><option value="all" ${appState.reviewFilter === "all" ? "selected" : ""}>Todas</option></select><button class="button button-primary review-bulk-button" data-action="review-bulk-beer" title="Marcar os pendentes desta página como finos" ${pendingVisible.length ? "" : "disabled"}>${icon("check")} Marcar imagens como finos</button><button class="button button-outline" data-action="export-review">${icon("file")} Exportar decisões</button></div></div><div class="review-grid">${cards || `<div class="empty-state"><p>Não há imagens neste filtro.</p></div>`}</div><div class="review-pagination"><p>A mostrar ${formatNumber(filtered.length ? start + 1 : 0)}–${formatNumber(Math.min(start + REVIEW_PAGE_SIZE, filtered.length))} de ${formatNumber(filtered.length)} imagens</p><div class="pagination-actions"><button class="icon-button" data-action="review-page" data-page="${appState.reviewPage - 1}" aria-label="Página anterior" ${appState.reviewPage <= 1 ? "disabled" : ""}>${icon("chevron-left")}</button><span>Página ${formatNumber(appState.reviewPage)} de ${formatNumber(totalPages)}</span><button class="icon-button" data-action="review-page" data-page="${appState.reviewPage + 1}" aria-label="Página seguinte" ${appState.reviewPage >= totalPages ? "disabled" : ""}>${icon("arrow-right")}</button></div></div>`;
+  hydrateReviewImages(previousImages);
 }
 
 function renderImportsStatus() {
   if (!appState.records.length && appState.mode !== "imported") {
-    dom.importsStatus.innerHTML = `<div class="import-status-head"><div><h2>Nothing imported yet</h2><p>The demo snapshot is visible in the dashboard; your first .txt import will replace it.</p></div><span class="file-badge">${icon("file")} waiting</span></div><div class="import-status-grid"><div class="import-status-metric"><span>Image files</span><strong>—</strong></div><div class="import-status-metric"><span>Counted beers</span><strong>—</strong></div><div class="import-status-metric"><span>Contacts loaded</span><strong>${formatNumber(appState.contacts.length)}</strong></div></div>`;
+    dom.importsStatus.innerHTML = `<div class="import-status-head"><div><h2>Ainda não foi importado nada</h2><p>A demonstração está visível no painel; a sua primeira importação .txt irá substituí-la.</p></div><span class="file-badge">${icon("file")} a aguardar</span></div><div class="import-status-grid"><div class="import-status-metric"><span>Ficheiros de imagem</span><strong>—</strong></div><div class="import-status-metric"><span>Finos contados</span><strong>—</strong></div><div class="import-status-metric"><span>Contactos carregados</span><strong>${formatNumber(appState.contacts.length)}</strong></div></div>`;
     return;
   }
   const imported = appState.mode === "imported";
-  dom.importsStatus.innerHTML = `<div class="import-status-head"><div><h2>${imported ? "Current ledger" : "Demo snapshot"}</h2><p>${escapeHtml(appState.importMeta.chatFileName || "No chat file")}${appState.importMeta.importedAt ? ` · processed ${escapeHtml(formatDate(appState.importMeta.importedAt))}` : ""}</p></div><span class="file-badge">${icon("check")} ${imported ? "processed" : "preview"}</span></div><div class="import-status-grid"><div class="import-status-metric"><span>Image files found</span><strong>${formatNumber(appState.stats.rawPhotoCount)}</strong></div><div class="import-status-metric"><span>Counted after dedupe</span><strong>${formatNumber(appState.stats.dedupedCount)}</strong></div><div class="import-status-metric"><span>Contacts loaded</span><strong>${formatNumber(appState.contacts.length)}</strong></div></div><div class="import-status-foot"><span class="status-pulse"></span><span>${imported ? "Saved locally in this browser. A fresh export will replace this ledger and recompute every ranking." : "This sample lets you explore the ledger before importing your own archive."}</span></div>`;
+  dom.importsStatus.innerHTML = `<div class="import-status-head"><div><h2>${imported ? "Registo atual" : "Demonstração"}</h2><p>${escapeHtml(appState.importMeta.chatFileName || "Nenhum ficheiro de chat")}${appState.importMeta.importedAt ? ` · processado em ${escapeHtml(formatDate(appState.importMeta.importedAt))}` : ""}</p></div><span class="file-badge">${icon("check")} ${imported ? "processado" : "pré-visualização"}</span></div><div class="import-status-grid"><div class="import-status-metric"><span>Ficheiros de imagem encontrados</span><strong>${formatNumber(appState.stats.rawPhotoCount)}</strong></div><div class="import-status-metric"><span>Contados após deduplicação</span><strong>${formatNumber(appState.stats.dedupedCount)}</strong></div><div class="import-status-metric"><span>Contactos carregados</span><strong>${formatNumber(appState.contacts.length)}</strong></div></div><div class="import-status-foot"><span class="status-pulse"></span><span>${imported ? "Guardado localmente neste navegador. Uma nova exportação substitui este registo e recalcula todas as classificações." : "Esta demonstração permite explorar o registo antes de importar o seu arquivo."}</span></div>`;
 }
 
 function renderTopbarAndSidebar() {
@@ -1008,6 +1210,7 @@ function renderTopbarAndSidebar() {
   const unmatchedCount = getUnmatchedParticipants().length;
   const navTotal = document.getElementById("navTotal");
   const navParticipants = document.getElementById("navParticipants");
+  const navReview = document.getElementById("navReview");
   const sidebarTotal = document.getElementById("sidebarTotal");
   const sidebarProgress = document.getElementById("sidebarProgress");
   const sidebarPercent = document.getElementById("sidebarPercent");
@@ -1017,13 +1220,14 @@ function renderTopbarAndSidebar() {
 
   if (navTotal) navTotal.textContent = formatNumber(total);
   if (navParticipants) navParticipants.textContent = String(appState.participants.length).padStart(2, "0");
+  if (navReview) navReview.textContent = appState.photoCandidates.length ? String(appState.photoCandidates.filter((record) => !appState.reviewDecisions[record.id]).length) : "—";
   if (sidebarTotal) sidebarTotal.textContent = formatNumber(total);
   if (sidebarProgress) sidebarProgress.style.width = `${Math.max(0.42, progress)}%`;
-  if (sidebarPercent) sidebarPercent.textContent = `${progress.toFixed(2)}%`;
+  if (sidebarPercent) sidebarPercent.textContent = `${formatPercent(progress)}%`;
   if (sidebarStatus) sidebarStatus.textContent = appState.mode === "imported"
-    ? (appState.justImported ? "Fresh archive processed" : "Saved archive restored")
-    : "Demo snapshot loaded";
-  if (topbarStatus) topbarStatus.textContent = appState.mode === "imported" ? `Imported · ${formatNumber(total)} beers` : `Demo snapshot · ${formatNumber(total)} beers`;
+    ? "Registo público atualizado"
+    : "Demonstração carregada";
+  if (topbarStatus) topbarStatus.textContent = appState.mode === "imported" ? `${formatNumber(total)} finos registados` : `Demonstração · ${formatNumber(total)} finos`;
   if (unmatchedCountNode) unmatchedCountNode.textContent = String(unmatchedCount).padStart(2, "0");
 }
 
@@ -1042,12 +1246,13 @@ function renderAll() {
   renderOverview();
   renderDaily();
   renderParticipants();
+  if (appState.currentView === "audit") renderReview();
   renderImportsStatus();
   if (appState.currentView === "detail") renderDetail();
 }
 
 function navigate(view) {
-  const allowed = ["overview", "daily", "participants", "imports", "detail"];
+  const allowed = ["overview", "daily", "participants", "detail"];
   if (!allowed.includes(view)) view = "overview";
   appState.currentView = view;
   if (view !== "detail") appState.selectedParticipant = view === "participants" ? appState.selectedParticipant : appState.selectedParticipant;
@@ -1080,14 +1285,14 @@ function closeMapper() {
 function renderMapper() {
   const people = appState.participants.filter((participant) => participant.senderType === "name");
   if (!people.length) {
-    dom.mapperMount.innerHTML = `<div class="mapper-empty">No saved display names are waiting for a phone link. Phone-number senders are matched by normalized digits automatically.</div>`;
+    dom.mapperMount.innerHTML = `<div class="mapper-empty">Não há nomes guardados à espera de associação. Os remetentes com telefone são associados automaticamente pelos dígitos normalizados.</div>`;
     return;
   }
   const contactOptions = appState.contacts.filter((contact) => contact.phone).map((contact) => `<option value="${escapeHtml(contact.phone)}">${escapeHtml(contact.name)} · ${escapeHtml(contact.phoneRaw || contact.phone)}</option>`).join("");
   dom.mapperMount.innerHTML = people.map((participant) => {
     const currentMapping = appState.manualMappings[participant.senderKey] || "";
     const matchingContact = appState.contacts.find((contact) => contact.phone === normalizePhone(currentMapping));
-    return `<div class="mapping-row"><div class="mapping-person"><strong>${escapeHtml(participant.displayName)}</strong><span>${formatNumber(participant.count)} beers · ${participant.matchStatus === "name-only" ? "unmatched" : "mapping saved"}</span></div><div class="mapping-control"><label for="map-${escapeHtml(participant.id)}">Link to contact</label><select id="map-${escapeHtml(participant.id)}" data-map-key="${escapeHtml(participant.senderKey)}"><option value="">Leave as name-only</option>${contactOptions}</select><input type="tel" value="${matchingContact ? "" : escapeHtml(currentMapping)}" data-map-phone="${escapeHtml(participant.senderKey)}" placeholder="Or enter phone digits" /></div></div>`;
+    return `<div class="mapping-row"><div class="mapping-person"><strong>${escapeHtml(participant.displayName)}</strong><span>${formatNumber(participant.count)} finos · ${participant.matchStatus === "name-only" ? "pendente" : "associação guardada"}</span></div><div class="mapping-control"><label for="map-${escapeHtml(participant.id)}">Associar a contacto</label><select id="map-${escapeHtml(participant.id)}" data-map-key="${escapeHtml(participant.senderKey)}"><option value="">Manter apenas como nome</option>${contactOptions}</select><input type="tel" value="${matchingContact ? "" : escapeHtml(currentMapping)}" data-map-phone="${escapeHtml(participant.senderKey)}" placeholder="Ou introduza os dígitos do telefone" /></div></div>`;
   }).join("");
 
   people.forEach((participant) => {
@@ -1108,7 +1313,107 @@ function saveMappings() {
   refreshDerived();
   closeMapper();
   renderAll();
-  showToast("Name mappings saved for future imports.");
+  showToast("Associações guardadas para futuras importações.");
+}
+
+let persistAppStateTimer = null;
+
+function schedulePersistAppState() {
+  window.clearTimeout(persistAppStateTimer);
+  persistAppStateTimer = window.setTimeout(() => {
+    persistAppStateTimer = null;
+    persistAppState();
+  }, 300);
+}
+
+function finishReviewMutation(render = true) {
+  applyReviewDecisions();
+  refreshDerived();
+  schedulePersistAppState();
+  if (!render) return;
+
+  if (appState.currentView === "audit") {
+    renderTopbarAndSidebar();
+    renderReview();
+  } else {
+    renderAll();
+  }
+}
+
+function bulkSetReviewDecisions(ids, decision, { render = true } = {}) {
+  ids.forEach((id) => {
+    if (decision) appState.reviewDecisions[id] = decision;
+    else delete appState.reviewDecisions[id];
+  });
+  persistReviewDecisions();
+  finishReviewMutation(render);
+}
+
+function setReviewDecision(id, decision) {
+  bulkSetReviewDecisions([id], decision);
+}
+
+function reviewConfirm(message) {
+  return typeof window.confirm === "function" ? window.confirm(message) : true;
+}
+
+function markCurrentReviewPageAsBeer() {
+  const targets = getCurrentReviewPageRecords().filter((record) => !appState.reviewDecisions[record.id]);
+  if (!targets.length) {
+    showToast("Não há imagens pendentes nesta página.");
+    return;
+  }
+
+  const duplicateCount = targets.filter((record) => record.duplicateCandidate).length;
+  const duplicateNote = duplicateCount
+    ? `\n\nA seleção inclui ${duplicateCount} candidato${duplicateCount === 1 ? "" : "s"} a duplicado; marcá-lo${duplicateCount === 1 ? "" : "s"} como fino substitui a deduplicação automática.`
+    : "";
+  if (!reviewConfirm(`Marcar ${targets.length} imagens desta página como finos?${duplicateNote}`)) return;
+
+  bulkSetReviewDecisions(targets.map((record) => record.id), "beer");
+  showToast(`<strong>${formatNumber(targets.length)} imagens marcadas como finos.</strong> A página foi preenchida com o próximo lote pendente.`);
+}
+
+function goToReviewPage(page) {
+  const targetPage = Number(page) || 1;
+  const currentPage = appState.reviewPage;
+  if (targetPage > currentPage) {
+    const targets = getCurrentReviewPageRecords().filter((record) => !appState.reviewDecisions[record.id]);
+    if (targets.length) {
+      const duplicateCount = targets.filter((record) => record.duplicateCandidate).length;
+      const duplicateNote = duplicateCount
+        ? `\n\nInclui ${duplicateCount} candidato${duplicateCount === 1 ? "" : "s"} a duplicado.`
+        : "";
+      const markAsBeer = reviewConfirm(`Esta página tem ${targets.length} imagens sem decisão. Quer marcá-las todas como finos antes de avançar?\n\nSim: marcar como fino e continuar.\nNão: avançar sem alterar.${duplicateNote}`);
+      if (markAsBeer) {
+        bulkSetReviewDecisions(targets.map((record) => record.id), "beer", { render: false });
+        // Pending and duplicate queues refill the current page after removal;
+        // other filters keep the normal next-page behaviour.
+        appState.reviewPage = ["pending", "duplicates"].includes(appState.reviewFilter) ? currentPage : targetPage;
+        renderTopbarAndSidebar();
+        renderReview();
+        showToast(`<strong>${formatNumber(targets.length)} imagens marcadas como finos.</strong> A mostrar o próximo lote pendente.`);
+        return;
+      }
+    }
+  }
+
+  appState.reviewPage = targetPage;
+  renderReview();
+}
+
+function exportReviewDecisions() {
+  const payload = JSON.stringify({ version: 1, decisions: appState.reviewDecisions }, null, 2);
+  const blob = new Blob([payload], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = REPOSITORY_REVIEW_FILE;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  showToast("Decisões exportadas. Pode substituir o review-decisions.json no repositório.");
 }
 
 function showToast(message) {
@@ -1134,6 +1439,7 @@ async function importChatFile(file) {
       appState.contacts = [];
     }
     appState.mode = "imported";
+    appState.photoCandidates = parsed.photoRecords;
     appState.records = parsed.records;
     appState.chatMessages = parsed.messages;
     appState.stats = {
@@ -1142,6 +1448,7 @@ async function importChatFile(file) {
       duplicateCount: parsed.duplicateCount,
       manualTotal: parsed.manualTotal,
     };
+    applyReviewDecisions();
     appState.importMeta.chatFileName = file.name;
     appState.importMeta.importedAt = new Date();
     appState.justImported = true;
@@ -1150,9 +1457,9 @@ async function importChatFile(file) {
     refreshDerived();
     persistAppState();
     navigate("overview");
-    showToast(`<strong>${formatNumber(parsed.dedupedCount)} beers counted.</strong> ${formatNumber(parsed.duplicateCount)} same-minute duplicate record${parsed.duplicateCount === 1 ? "" : "s"} removed.`);
+    showToast(`<strong>${formatNumber(appState.stats.dedupedCount)} finos contados.</strong> ${formatNumber(appState.stats.duplicateCount)} duplicado${appState.stats.duplicateCount === 1 ? "" : "s"} automático${appState.stats.duplicateCount === 1 ? "" : "s"} removido${appState.stats.duplicateCount === 1 ? "" : "s"}.`);
   } catch (error) {
-    showToast("Could not read that chat export. Check that it is a UTF-8 .txt file.");
+    showToast("Não foi possível ler essa exportação. Confirme que é um ficheiro .txt UTF-8.");
     console.error(error);
   }
 }
@@ -1175,15 +1482,25 @@ async function importContactsFile(file) {
 
 async function loadRepositorySources() {
   try {
-    const [chatResponse, contactsResponse] = await Promise.all([
+    const [chatResponse, contactsResponse, reviewResponse] = await Promise.all([
       fetch(encodeURI(REPOSITORY_CHAT_FILE), { cache: "no-store" }),
       fetch(REPOSITORY_CONTACTS_FILE, { cache: "no-store" }),
+      fetch(REPOSITORY_REVIEW_FILE, { cache: "no-store" }),
     ]);
     if (!chatResponse.ok) return;
+
+    if (reviewResponse.ok) {
+      const reviewPayload = await reviewResponse.json();
+      const repositoryDecisions = reviewPayload?.decisions || reviewPayload;
+      if (repositoryDecisions && typeof repositoryDecisions === "object") {
+        appState.reviewDecisions = { ...repositoryDecisions, ...appState.reviewDecisions };
+      }
+    }
 
     const chatText = await chatResponse.text();
     const parsed = parseWhatsAppChat(chatText);
     appState.mode = "imported";
+    appState.photoCandidates = parsed.photoRecords;
     appState.records = parsed.records;
     appState.chatMessages = parsed.messages;
     appState.stats = {
@@ -1192,6 +1509,7 @@ async function loadRepositorySources() {
       duplicateCount: parsed.duplicateCount,
       manualTotal: parsed.manualTotal,
     };
+    applyReviewDecisions();
     appState.importMeta.chatFileName = REPOSITORY_CHAT_FILE;
     appState.importMeta.importedAt = new Date();
     appState.justImported = false;
@@ -1274,6 +1592,20 @@ document.addEventListener("click", (event) => {
     if (trigger.disabled) return;
     appState.detailPage = Number(trigger.dataset.page) || 1;
     renderDetail();
+  } else if (action === "review-decision") {
+    event.preventDefault();
+    setReviewDecision(trigger.dataset.id, trigger.dataset.decision || null);
+  } else if (action === "review-page") {
+    event.preventDefault();
+    if (trigger.disabled) return;
+    goToReviewPage(trigger.dataset.page);
+  } else if (action === "review-bulk-beer") {
+    event.preventDefault();
+    if (trigger.disabled) return;
+    markCurrentReviewPageAsBeer();
+  } else if (action === "export-review") {
+    event.preventDefault();
+    exportReviewDecisions();
   } else if (action === "toggle-sidebar") {
     event.preventDefault();
     dom.sidebar.classList.toggle("is-open");
@@ -1293,14 +1625,29 @@ document.addEventListener("change", (event) => {
   } else if (event.target.id === "participantSort") {
     appState.participantSort = event.target.value;
     renderParticipants();
+  } else if (event.target.id === "reviewFilter") {
+    appState.reviewFilter = event.target.value;
+    appState.reviewPage = 1;
+    renderReview();
   }
 });
 
 document.addEventListener("input", (event) => {
-  if (event.target.id !== "participantSearch") return;
-  appState.participantSearch = event.target.value;
-  const body = document.getElementById("participantsTableBody");
-  if (body) body.innerHTML = renderParticipantRows();
+  if (event.target.id === "participantSearch") {
+    appState.participantSearch = event.target.value;
+    const body = document.getElementById("participantsTableBody");
+    if (body) body.innerHTML = renderParticipantRows();
+  } else if (event.target.id === "reviewSearch") {
+    appState.reviewSearch = event.target.value;
+    appState.reviewPage = 1;
+    const caret = event.target.selectionStart;
+    renderReview();
+    const search = document.getElementById("reviewSearch");
+    if (search) {
+      search.focus();
+      search.setSelectionRange(caret, caret);
+    }
+  }
 });
 
 dom.mapperDialog.addEventListener("click", (event) => {
@@ -1320,6 +1667,7 @@ if (!restoredLedger) {
 }
 refreshDerived();
 renderAll();
+loadRepositorySources();
 
 // Kept available for lightweight console/fixture checks without exposing any
 // data outside the page.
@@ -1328,6 +1676,7 @@ window.UmMilhaoDeFinos = {
   parseContactsCsv,
   normalizePhone,
   dailyBucketKey,
+  exportReviewDecisions,
   get state() {
     return appState;
   },

@@ -1,14 +1,14 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-PT">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#17130f" />
     <meta
       name="description"
-      content="Um Milhão de Finos — a traceable WhatsApp beer counter for one million logged beers."
+      content="Um Milhão de Finos — um contador auditável de cervejas do WhatsApp rumo a um milhão de finos."
     />
-    <title>Um Milhão de Finos · Beer ledger</title>
+    <title>Um Milhão de Finos · Registo de finos</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -90,75 +90,61 @@
             <svg class="icon icon-large"><use href="#icon-beer"></use></svg>
           </div>
           <div>
-            <p class="brand-kicker">the group ledger</p>
+            <p class="brand-kicker">o registo do grupo</p>
             <p class="brand-name">Um Milhão<br /><em>de Finos</em></p>
           </div>
         </div>
 
         <div class="sidebar-divider"></div>
-        <p class="nav-label">Workspace</p>
-        <nav class="main-nav" aria-label="Primary navigation">
+        <p class="nav-label">Área de trabalho</p>
+        <nav class="main-nav" aria-label="Navegação principal">
           <button class="nav-item is-active" data-action="navigate" data-view="overview">
             <svg class="icon"><use href="#icon-grid"></use></svg>
-            <span>Overview</span>
-            <span class="nav-item-count" id="navTotal">4,173</span>
+            <span>Visão geral</span>
+            <span class="nav-item-count" id="navTotal">4 173</span>
           </button>
           <button class="nav-item" data-action="navigate" data-view="daily">
             <svg class="icon"><use href="#icon-calendar"></use></svg>
-            <span>Daily window</span>
+            <span>Janela diária</span>
           </button>
           <button class="nav-item" data-action="navigate" data-view="participants">
             <svg class="icon"><use href="#icon-users"></use></svg>
-            <span>Participants</span>
+            <span>Participantes</span>
             <span class="nav-item-count" id="navParticipants">07</span>
-          </button>
-          <button class="nav-item" data-action="navigate" data-view="imports">
-            <svg class="icon"><use href="#icon-upload"></use></svg>
-            <span>Import centre</span>
           </button>
         </nav>
 
         <div class="sidebar-target">
           <div class="target-topline">
-            <span>Road to one million</span>
+            <span>Rumo ao milhão</span>
             <svg class="icon"><use href="#icon-arrow-up-right"></use></svg>
           </div>
-          <div class="target-number"><span id="sidebarTotal">4,173</span><small>/ 1M</small></div>
-          <div class="target-track" aria-label="Progress toward one million beers">
+          <div class="target-number"><span id="sidebarTotal">4 173</span><small>/ 1M</small></div>
+          <div class="target-track" aria-label="Progresso rumo a um milhão de finos">
             <span id="sidebarProgress"></span>
           </div>
-          <div class="target-meta"><span id="sidebarPercent">0.42%</span><span>keep them coming</span></div>
+          <div class="target-meta"><span id="sidebarPercent">0,42%</span><span>que venham mais</span></div>
         </div>
 
         <div class="sidebar-bottom">
           <div class="sync-status">
             <span class="status-pulse"></span>
-            <span id="sidebarStatus">Demo snapshot loaded</span>
+            <span id="sidebarStatus">A carregar demonstração</span>
           </div>
-          <p class="sidebar-note">One deduplicated image<br />equals one fin.</p>
+          <p class="sidebar-note">Uma imagem deduplicada<br />equivale a um fino.</p>
         </div>
       </aside>
 
       <main class="main-content">
         <header class="topbar">
           <div class="topbar-left">
-            <button class="mobile-menu-button" data-action="toggle-sidebar" aria-label="Open navigation">
+            <button class="mobile-menu-button" data-action="toggle-sidebar" aria-label="Abrir navegação">
               <svg class="icon"><use href="#icon-menu"></use></svg>
             </button>
             <div class="topbar-context">
-              <span class="topbar-kicker">WhatsApp beer ledger</span>
-              <span class="topbar-status" id="topbarStatus">Demo snapshot · 4,173 beers</span>
+              <span class="topbar-kicker">registo de finos do WhatsApp</span>
+              <span class="topbar-status" id="topbarStatus">Demonstração · 4 173 finos</span>
             </div>
-          </div>
-          <div class="topbar-actions">
-            <button class="button button-quiet" data-action="pick-contacts">
-              <svg class="icon"><use href="#icon-users"></use></svg>
-              <span>Contacts CSV</span>
-            </button>
-            <button class="button button-primary" data-action="pick-chat">
-              <svg class="icon"><use href="#icon-upload"></use></svg>
-              <span>Import chat .txt</span>
-            </button>
           </div>
         </header>
 
@@ -166,15 +152,10 @@
           <section class="view is-active" id="view-overview" aria-labelledby="overview-title">
             <div class="page-intro">
               <div>
-                <p class="eyebrow">The long game · archive intelligence</p>
-                <h1 id="overview-title">A million beers.<br /><em>One tidy ledger.</em></h1>
-                <p class="page-description">Turn the group’s WhatsApp photo trail into a count you can actually audit.</p>
+                <p class="eyebrow">O jogo longo · inteligência do arquivo</p>
+                <h1 id="overview-title">Um milhão de finos.<br /><em>Um registo impecável.</em></h1>
+                <p class="page-description">Acompanhe a contagem do grupo, os líderes de sempre e o ranking do último período diário.</p>
               </div>
-              <button class="button button-outline" data-action="resolve-names">
-                <svg class="icon"><use href="#icon-link"></use></svg>
-                <span>Resolve names</span>
-                <span class="button-count" id="unmatchedCount">02</span>
-              </button>
             </div>
             <div id="overviewMount"></div>
           </section>
@@ -182,9 +163,9 @@
           <section class="view" id="view-daily" aria-labelledby="daily-title">
             <div class="page-intro page-intro-compact">
               <div>
-                <p class="eyebrow">A day is not midnight to midnight</p>
-                <h1 id="daily-title">Daily <em>rounds.</em></h1>
-                <p class="page-description">Every bucket runs from 08:00 through 08:00, the way the group counts it.</p>
+                <p class="eyebrow">Um dia não vai da meia-noite à meia-noite</p>
+                <h1 id="daily-title">Contagens <em>diárias.</em></h1>
+                <p class="page-description">Cada período vai das 08:00 às 08:00, tal como o grupo faz a contagem.</p>
               </div>
               <div class="window-note"><span class="window-note-dot"></span>08:00 → 08:00</div>
             </div>
@@ -194,49 +175,45 @@
           <section class="view" id="view-participants" aria-labelledby="participants-title">
             <div class="page-intro page-intro-compact">
               <div>
-                <p class="eyebrow">Every sender, every fin</p>
-                <h1 id="participants-title">The <em>roll call.</em></h1>
-                <p class="page-description">Click through to inspect the original filenames behind any total.</p>
+                <p class="eyebrow">Cada remetente, cada fino</p>
+                <h1 id="participants-title">A <em>lista.</em></h1>
+                <p class="page-description">Consulte a evolução e a classificação de cada participante no arquivo do grupo.</p>
               </div>
-              <button class="button button-outline" data-action="resolve-names">
-                <svg class="icon"><use href="#icon-link"></use></svg>
-                <span>Resolve unmatched</span>
-              </button>
             </div>
             <div id="participantsMount"></div>
           </section>
 
-          <section class="view" id="view-imports" aria-labelledby="imports-title">
+          <section class="view" id="view-imports" aria-labelledby="imports-title" hidden>
             <div class="page-intro page-intro-compact">
               <div>
-                <p class="eyebrow">Replace, recompute, repeat</p>
-                <h1 id="imports-title">Bring in the <em>archive.</em></h1>
-                <p class="page-description">Each WhatsApp export is the whole story. A fresh import replaces the current ledger — never appends.</p>
+                <p class="eyebrow">Substituir, recalcular, repetir</p>
+                <h1 id="imports-title">Traga o <em>arquivo.</em></h1>
+                <p class="page-description">Cada exportação do WhatsApp contém o histórico completo. Uma nova importação substitui o registo atual — nunca acrescenta. Ao servir esta pasta, os ficheiros do repositório são carregados automaticamente.</p>
               </div>
-              <div class="import-policy"><span class="status-pulse"></span>Replace &amp; recompute</div>
+              <div class="import-policy"><span class="status-pulse"></span>Fontes do repositório · .txt + CSV</div>
             </div>
             <div class="import-layout">
               <div class="import-main-column">
                 <div class="dropzone-grid">
-                  <div class="dropzone" id="chatDropzone" data-file-kind="chat" tabindex="0" role="button" aria-label="Import WhatsApp chat text file">
+                  <div class="dropzone" id="chatDropzone" data-file-kind="chat" tabindex="0" role="button" aria-label="Importar ficheiro de texto do chat do WhatsApp">
                     <input id="chatFileInput" type="file" accept=".txt,text/plain" hidden />
                     <div class="dropzone-icon"><svg class="icon icon-large"><use href="#icon-file"></use></svg></div>
                     <div class="dropzone-copy">
-                      <p class="dropzone-kicker">Primary source</p>
-                      <h2>WhatsApp chat export</h2>
-                      <p>Drop the <strong>.txt</strong> export here. Media stay out; filenames are enough.</p>
+                      <p class="dropzone-kicker">Fonte principal</p>
+                      <h2>Exportação do chat do WhatsApp</h2>
+                      <p>Largue aqui a exportação <strong>.txt</strong>. As imagens ficam de fora; os nomes dos ficheiros chegam.</p>
                     </div>
-                    <button class="button button-dark" data-action="pick-chat" type="button">Choose .txt <svg class="icon"><use href="#icon-arrow-right"></use></svg></button>
+                    <button class="button button-dark" data-action="pick-chat" type="button">Escolher .txt <svg class="icon"><use href="#icon-arrow-right"></use></svg></button>
                   </div>
-                  <div class="dropzone dropzone-secondary" id="contactsDropzone" data-file-kind="contacts" tabindex="0" role="button" aria-label="Import contacts CSV">
+                  <div class="dropzone dropzone-secondary" id="contactsDropzone" data-file-kind="contacts" tabindex="0" role="button" aria-label="Importar CSV de contactos">
                     <input id="contactsFileInput" type="file" accept=".csv,text/csv,.txt" hidden />
                     <div class="dropzone-icon"><svg class="icon icon-large"><use href="#icon-users"></use></svg></div>
                     <div class="dropzone-copy">
-                      <p class="dropzone-kicker">Optional roster</p>
-                      <h2>Contacts CSV</h2>
-                      <p>Comma, semicolon, or a <strong>sep=;</strong> header — we’ll detect it.</p>
+                      <p class="dropzone-kicker">Lista opcional</p>
+                      <h2>CSV de contactos</h2>
+                      <p>Vírgulas, ponto e vírgula ou cabeçalho <strong>sep=;</strong> — detetamos tudo.</p>
                     </div>
-                    <button class="button button-light" data-action="pick-contacts" type="button">Choose CSV <svg class="icon"><use href="#icon-arrow-right"></use></svg></button>
+                    <button class="button button-light" data-action="pick-contacts" type="button">Escolher CSV <svg class="icon"><use href="#icon-arrow-right"></use></svg></button>
                   </div>
                 </div>
 
@@ -246,19 +223,19 @@
               <aside class="rules-card">
                 <div class="card-heading">
                   <div>
-                    <p class="eyebrow">Parser contract</p>
-                    <h2>What gets counted</h2>
+                    <p class="eyebrow">Regras do parser</p>
+                    <h2>O que é contado</h2>
                   </div>
                   <svg class="icon"><use href="#icon-sliders"></use></svg>
                 </div>
                 <ul class="rules-list">
-                  <li><span class="rule-check"><svg class="icon"><use href="#icon-check"></use></svg></span><span><strong>IMG only.</strong> JPG, JPEG, and PNG attachments count. STK, VID, OPUS, and other files do not; an un-timestamped caption cannot hide the IMG line.</span></li>
-                  <li><span class="rule-check"><svg class="icon"><use href="#icon-check"></use></svg></span><span><strong>Same sender + same minute.</strong> Consecutive image records collapse to one fin, even across system lines.</span></li>
-                  <li><span class="rule-check"><svg class="icon"><use href="#icon-check"></use></span><span><strong>Bare numbers are a check only.</strong> The highest manual tally never changes attribution or totals.</span></li>
-                  <li><span class="rule-check"><svg class="icon"><use href="#icon-check"></use></span><span><strong>Phone matching is exact after cleanup.</strong> Saved display names stay visibly unmatched until you resolve them.</span></li>
-                  <li><span class="rule-check"><svg class="icon"><use href="#icon-check"></use></span><span><strong>Daily means 08:00 → 08:00.</strong> Early-morning photos belong to the previous bucket.</span></li>
+                  <li><span class="rule-check"><svg class="icon"><use href="#icon-check"></use></svg></span><span><strong>Apenas IMG.</strong> Contam anexos JPG, JPEG e PNG. STK, VID, OPUS e outros ficheiros não contam; uma legenda sem data não esconde a linha IMG.</span></li>
+                  <li><span class="rule-check"><svg class="icon"><use href="#icon-check"></use></svg></span><span><strong>Mesmo remetente + mesmo minuto.</strong> Registos de imagem consecutivos passam a contar como um fino, mesmo com linhas de sistema pelo meio.</span></li>
+                  <li><span class="rule-check"><svg class="icon"><use href="#icon-check"></use></span><span><strong>Números isolados são só uma verificação.</strong> O maior total manual nunca altera a atribuição nem a contagem.</span></li>
+                  <li><span class="rule-check"><svg class="icon"><use href="#icon-check"></use></span><span><strong>A correspondência telefónica é exata após limpeza.</strong> Nomes guardados ficam visivelmente pendentes até serem associados.</span></li>
+                  <li><span class="rule-check"><svg class="icon"><use href="#icon-check"></use></span><span><strong>O dia vai das 08:00 às 08:00.</strong> Fotografias antes das 08:00 pertencem ao período anterior.</span></li>
                 </ul>
-                <a class="text-link" href="README.md" target="_blank" rel="noreferrer">Read the implementation notes <svg class="icon"><use href="#icon-arrow-up-right"></use></svg></a>
+                <a class="text-link" href="README.md" target="_blank" rel="noreferrer">Ler as notas de implementação <svg class="icon"><use href="#icon-arrow-up-right"></use></svg></a>
               </aside>
             </div>
           </section>
@@ -270,20 +247,20 @@
       </main>
     </div>
 
-    <dialog class="mapper-dialog" id="mapperDialog" aria-labelledby="mapper-title">
+    <dialog class="mapper-dialog" id="mapperDialog" aria-labelledby="mapper-title" hidden>
       <div class="dialog-shell">
         <div class="dialog-header">
           <div>
-            <p class="eyebrow">Persistent contact links</p>
-            <h2 id="mapper-title">Put a phone behind a name.</h2>
-            <p>These display names came from the chat export. They’re kept separate from phone matches until you say otherwise.</p>
+            <p class="eyebrow">Ligações de contactos persistentes</p>
+            <h2 id="mapper-title">Associe um telefone a um nome.</h2>
+            <p>Estes nomes vêm da exportação do chat. Mantêm-se separados das correspondências telefónicas até os associar.</p>
           </div>
-          <button class="icon-button" data-action="close-mapper" aria-label="Close name resolver"><svg class="icon"><use href="#icon-x"></use></svg></button>
+          <button class="icon-button" data-action="close-mapper" aria-label="Fechar associação de nomes"><svg class="icon"><use href="#icon-x"></use></svg></button>
         </div>
         <div id="mapperMount"></div>
         <div class="dialog-footer">
-          <button class="button button-light" data-action="close-mapper">Cancel</button>
-          <button class="button button-primary" data-action="save-mappings"><svg class="icon"><use href="#icon-link"></use></svg>Save mappings</button>
+          <button class="button button-light" data-action="close-mapper">Cancelar</button>
+          <button class="button button-primary" data-action="save-mappings"><svg class="icon"><use href="#icon-link"></use></svg>Guardar associações</button>
         </div>
       </div>
     </dialog>
