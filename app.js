@@ -210,7 +210,7 @@ function formatBucketLabel(dayKey, compact = false) {
 function publicParticipantName(participant) {
   if (PRIVATE_ADMIN) return participant.displayName;
   if (participant.member?.name) return participant.member.name;
-  return participant.senderType === "phone" ? "Participante sem nome" : participant.displayName;
+  return participant.senderType === "phone" ? "Participante" : participant.displayName;
 }
 
 function formatIdentitySubtitle(participant) {
