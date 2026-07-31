@@ -39,6 +39,17 @@ A implementação em `app.js` trata os casos da exportação do WhatsApp que alt
 - **Visão geral** — total acumulado, progresso até 1 000 000, verificação pós-importação, top 10 total e top 10 do último período diário.
 - **Janela diária** — classificação selecionável por períodos das 08:00 às 08:00.
 - **Participantes** — lista pesquisável e ordenável com o estado da identidade.
-- **Detalhe do participante** — registo paginado com data, hora, nome original do ficheiro, período e totais por dia.
+- **Detalhe do participante** — registo paginado com miniatura, data, hora, nome original do ficheiro, período e totais por dia.
+
+## Revisão privada
+
+A página pública não mostra a fila de auditoria. Para rever uma nova exportação sem a publicar:
+
+1. Sirva a pasta com `python -m http.server 4173`.
+2. Abra `http://localhost:4173/local-admin.html`.
+3. Use o filtro **Pares candidatos a duplicado**.
+4. Exporte as decisões e substitua `review-decisions.json` antes de publicar.
+
+`local-admin.html` e o arquivo `Media/` ficam ignorados pelo Git por defeito. As miniaturas usam o valor de `meta[name="media-base-url"]` em `index.html`; em produção, aponte-o para um bucket/CDN público do DigitalOcean Spaces em vez de colocar o arquivo inteiro no Git.
 
 Para verificações rápidas na consola do navegador, a página expõe `window.UmMilhaoDeFinos.parseWhatsAppChat`, `parseContactsCsv`, `normalizePhone` e `dailyBucketKey`.
