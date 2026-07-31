@@ -12,6 +12,8 @@ const REPOSITORY_CHAT_FILE = "WhatsApp Chat with Um Milhão de Finos.txt";
 const REPOSITORY_CONTACTS_FILE = "contacts.csv";
 const REPOSITORY_REVIEW_FILE = "review-decisions.json";
 const REPOSITORY_MEDIA_DIRECTORY = "Media";
+const MEDIA_BASE_URL = document.querySelector?.('meta[name="media-base-url"]')?.content || REPOSITORY_MEDIA_DIRECTORY;
+const PRIVATE_ADMIN = document.documentElement.dataset.siteMode === "admin";
 const REVIEW_PAGE_SIZE = 48;
 const numberFormat = new Intl.NumberFormat("pt-PT");
 const dateFormat = new Intl.DateTimeFormat("pt-PT", {
@@ -41,7 +43,7 @@ const dom = {
 
 const appState = {
   mode: "demo",
-  currentView: "overview",
+  currentView: PRIVATE_ADMIN ? "audit" : "overview",
   records: [],
   photoCandidates: [],
   participants: [],
@@ -63,7 +65,7 @@ const appState = {
   reviewDecisions: loadReviewDecisions(),
   selectedDay: null,
   reviewPage: 1,
-  reviewFilter: "pending",
+  reviewFilter: PRIVATE_ADMIN ? "duplicates" : "pending",
   reviewSearch: "",
   selectedParticipant: null,
   detailPage: 1,
@@ -903,6 +905,7 @@ function renderImportSummary() {
 }
 
 function renderOverview() {
+  if (!dom.overviewMount) return;
   const total = appState.stats.dedupedCount;
   const progress = Math.min(100, (total / TARGET_BEERS) * 100);
   const totalRanking = appState.participants.slice(0, 10).map((participant) => ({ participant, count: participant.count }));
@@ -970,6 +973,7 @@ function renderOverview() {
 }
 
 function renderDaily() {
+  if (!dom.dailyMount) return;
   if (!appState.records.length) {
     dom.dailyMount.innerHTML = emptyStateHtml("Ainda não há contagens diárias.", "Importe um chat e os períodos das 08:00 às 08:00 serão criados automaticamente.");
     return;
@@ -1021,14 +1025,13 @@ function renderParticipantRows() {
 }
 
 function renderParticipants() {
+  if (!dom.participantsMount) return;
   if (!appState.records.length) {
     dom.participantsMount.innerHTML = emptyStateHtml("Ainda não há lista de participantes.", "Depois de importar um chat, todos os remetentes com uma imagem contada aparecem aqui.");
     return;
   }
-  const unmatched = getUnmatchedParticipants().length;
   dom.participantsMount.innerHTML = `
-    <div class="participants-toolbar"><div><h2>${formatNumber(appState.participants.length)} participante${appState.participants.length === 1 ? "" : "s"}</h2><p>${formatNumber(appState.stats.dedupedCount)} submissões de fotografias deduplicadas no arquivo atual.</p></div><div class="toolbar-tools"><div class="search-wrap"><label for="participantSearch">Procurar remetente</label>${icon("search")}<input id="participantSearch" type="search" value="${escapeHtml(appState.participantSearch)}" placeholder="Nome ou telefone" /></div><div><label class="select-wrap-label" for="participantSort">Ordenar</label><select class="sort-select" id="participantSort"><option value="count" ${appState.participantSort === "count" ? "selected" : ""}>Mais finos</option><option value="name" ${appState.participantSort === "name" ? "selected" : ""}>Nome A–Z</option><option value="status" ${appState.participantSort === "status" ? "selected" : ""}>Estado da identidade</option></select></div></div></div>
-    <div class="contact-note">${icon("info")}<span><strong>${unmatched ? `${unmatched} nome${unmatched === 1 ? " guardado permanece" : "s guardados permanecem"} pendente${unmatched === 1 ? "" : "s"}.` : "Todos os remetentes estão associados."}</strong> Os números de telefone são normalizados apenas por dígitos; os nomes guardados nunca são adivinhados. Use Associar nomes para guardar uma associação manual.</span></div>
+    <div class="participants-toolbar"><div><h2>${formatNumber(appState.participants.length)} participante${appState.participants.length === 1 ? "" : "s"}</h2><p>${formatNumber(appState.stats.dedupedCount)} submissões de fotografias deduplicadas no arquivo atual.</p></div><div class="toolbar-tools"><div class="search-wrap"><label for="participantSearch">Encontrar o seu registo</label>${icon("search")}<input id="participantSearch" type="search" value="${escapeHtml(appState.participantSearch)}" placeholder="Procurar nome ou telefone" /></div><div><label class="select-wrap-label" for="participantSort">Ordenar</label><select class="sort-select" id="participantSort"><option value="count" ${appState.participantSort === "count" ? "selected" : ""}>Mais finos</option><option value="name" ${appState.participantSort === "name" ? "selected" : ""}>Nome A–Z</option><option value="status" ${appState.participantSort === "status" ? "selected" : ""}>Estado da identidade</option></select></div></div></div>
     <section class="table-card"><div class="table-scroll"><table><thead><tr><th>#</th><th>Participante</th><th>Finos</th><th>Estado da identidade</th></tr></thead><tbody id="participantsTableBody">${renderParticipantRows()}</tbody></table></div><div class="table-footer"><span>Ordenado por ${appState.participantSort === "count" ? "número de finos" : appState.participantSort === "name" ? "nome" : "estado da identidade"}</span><span>Abra um remetente para consultar os envios</span></div></section>`;
 }
 
@@ -1042,6 +1045,7 @@ function participantDailyTotals(participant) {
 }
 
 function renderDetail() {
+  if (!dom.detailMount) return;
   const participant = getParticipantById(appState.selectedParticipant);
   if (!participant) {
     dom.detailMount.innerHTML = emptyStateHtml("Escolha um participante.", "O detalhe abre quando clicar num remetente de uma classificação.", "navigate");
@@ -1063,7 +1067,7 @@ function renderDetail() {
         ? `Contacto associado: ${participant.member.name} · ${participant.member.phoneRaw}`
         : "Este remetente tem uma associação telefónica guardada para futuras importações.";
   const rows = visibleRecords
-    .map((record) => `<tr><td>${escapeHtml(record.timestamp ? formatDate(record.timestamp) : record.dateText)}</td><td class="bucket-cell">${escapeHtml(record.timestamp ? formatTime(record.timestamp, record.timeText) : record.timeText)}</td><td class="filename-cell" title="${escapeHtml(record.filename)}">${escapeHtml(record.filename)}</td><td class="bucket-cell">${escapeHtml(formatBucketLabel(record.dayKey, true))}</td></tr>`)
+    .map((record) => `<tr><td class="thumbnail-cell"><a href="${escapeHtml(mediaUrl(record.filename))}" target="_blank" rel="noreferrer" title="Abrir ${escapeHtml(record.filename)}"><img class="detail-thumbnail" src="${escapeHtml(mediaUrl(record.filename))}" alt="${escapeHtml(record.filename)}" loading="lazy" decoding="async" /></a></td><td>${escapeHtml(record.timestamp ? formatDate(record.timestamp) : record.dateText)}</td><td class="bucket-cell">${escapeHtml(record.timestamp ? formatTime(record.timestamp, record.timeText) : record.timeText)}</td><td class="filename-cell" title="${escapeHtml(record.filename)}">${escapeHtml(record.filename)}</td><td class="bucket-cell">${escapeHtml(formatBucketLabel(record.dayKey, true))}</td></tr>`)
     .join("");
   const dayRows = dailyTotals.slice(0, 10)
     .map(({ dayKey, count }) => `<div class="day-total-row"><div><p>${escapeHtml(formatBucketLabel(dayKey, true))}</p><span>08:00 → next day 08:00</span></div><strong>${formatNumber(count)}</strong></div>`)
@@ -1073,13 +1077,13 @@ function renderDetail() {
     <button class="detail-back" data-action="navigate" data-view="participants">${icon("chevron-left")} Voltar aos participantes</button>
     <div class="detail-heading"><div class="detail-person">${avatarHtml(participant, appState.participants.indexOf(participant), true)}<div><p class="eyebrow">Detalhe do participante</p><h1 id="detail-title">${escapeHtml(participant.displayName)}</h1><p>${escapeHtml(formatIdentitySubtitle(participant))}</p>${statusHtml(participant)}</div></div><div class="detail-total"><span>Finos deduplicados</span><strong>${formatNumber(participant.count)}</strong></div></div>
     <div class="detail-grid">
-      <section class="detail-log-card"><div class="detail-card-header"><div><h2>Envios originais</h2><p>Cada linha corresponde a um anexo IMG contado.</p></div><span class="mono-note">${formatNumber(participant.count)} total</span></div><div class="table-scroll"><table class="detail-log-table"><thead><tr><th>Data</th><th>Hora</th><th>Nome original</th><th>Período das 08:00</th></tr></thead><tbody>${rows}</tbody></table></div><div class="pagination"><p>A mostrar ${formatNumber(start + 1)}–${formatNumber(Math.min(start + pageSize, sortedRecords.length))} de ${formatNumber(sortedRecords.length)}</p><div class="pagination-actions"><button class="icon-button" data-action="detail-page" data-page="${appState.detailPage - 1}" aria-label="Página anterior" ${appState.detailPage <= 1 ? "disabled" : ""}>${icon("chevron-left")}</button><button class="icon-button" data-action="detail-page" data-page="${appState.detailPage + 1}" aria-label="Página seguinte" ${appState.detailPage >= totalPages ? "disabled" : ""}>${icon("arrow-right")}</button></div></div></section>
+      <section class="detail-log-card"><div class="detail-card-header"><div><h2>Envios originais</h2><p>Cada linha corresponde a um anexo IMG contado.</p></div><span class="mono-note">${formatNumber(participant.count)} total</span></div><div class="table-scroll"><table class="detail-log-table"><thead><tr><th>Imagem</th><th>Data</th><th>Hora</th><th>Nome original</th><th>Período das 08:00</th></tr></thead><tbody>${rows}</tbody></table></div><div class="pagination"><p>A mostrar ${formatNumber(start + 1)}–${formatNumber(Math.min(start + pageSize, sortedRecords.length))} de ${formatNumber(sortedRecords.length)}</p><div class="pagination-actions"><button class="icon-button" data-action="detail-page" data-page="${appState.detailPage - 1}" aria-label="Página anterior" ${appState.detailPage <= 1 ? "disabled" : ""}>${icon("chevron-left")}</button><button class="icon-button" data-action="detail-page" data-page="${appState.detailPage + 1}" aria-label="Página seguinte" ${appState.detailPage >= totalPages ? "disabled" : ""}>${icon("arrow-right")}</button></div></div></section>
       <aside><section class="detail-days-card"><div class="detail-card-header"><div><h2>Finos por dia</h2><p>O mesmo limite das 08:00, por remetente.</p></div></div><div class="detail-days-list">${dayRows || `<div class="empty-state"><p>Não há registos datados válidos.</p></div>`}</div>${dailyTotals.length > 10 ? `<div class="table-footer"><span>A mostrar os 10 períodos mais recentes</span><span>${formatNumber(dailyTotals.length)} no total</span></div>` : ""}</section><div class="detail-contact-card"><h3>${participant.matchStatus === "name-only" ? "Nome identificado, telefone pendente" : "Resolução de identidade"}</h3><p>${escapeHtml(contactDescription)}</p></div></aside>
     </div>`;
 }
 
 function mediaUrl(filename) {
-  return `${REPOSITORY_MEDIA_DIRECTORY}/${encodeURIComponent(filename)}`;
+  return `${MEDIA_BASE_URL.replace(/\/+$/, "")}/${encodeURIComponent(filename)}`;
 }
 
 function reviewDecisionLabel(decision) {
@@ -1196,6 +1200,7 @@ function renderReview() {
 }
 
 function renderImportsStatus() {
+  if (!dom.importsStatus) return;
   if (!appState.records.length && appState.mode !== "imported") {
     dom.importsStatus.innerHTML = `<div class="import-status-head"><div><h2>Ainda não foi importado nada</h2><p>A demonstração está visível no painel; a sua primeira importação .txt irá substituí-la.</p></div><span class="file-badge">${icon("file")} a aguardar</span></div><div class="import-status-grid"><div class="import-status-metric"><span>Ficheiros de imagem</span><strong>—</strong></div><div class="import-status-metric"><span>Finos contados</span><strong>—</strong></div><div class="import-status-metric"><span>Contactos carregados</span><strong>${formatNumber(appState.contacts.length)}</strong></div></div>`;
     return;
@@ -1252,11 +1257,11 @@ function renderAll() {
 }
 
 function navigate(view) {
-  const allowed = ["overview", "daily", "participants", "detail"];
-  if (!allowed.includes(view)) view = "overview";
+  const allowed = PRIVATE_ADMIN ? ["overview", "daily", "participants", "audit", "imports", "detail"] : ["overview", "daily", "participants", "detail"];
+  if (!allowed.includes(view)) view = PRIVATE_ADMIN ? "audit" : "overview";
   appState.currentView = view;
   if (view !== "detail") appState.selectedParticipant = view === "participants" ? appState.selectedParticipant : appState.selectedParticipant;
-  dom.sidebar.classList.remove("is-open");
+  dom.sidebar?.classList.remove("is-open");
   renderAll();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
@@ -1650,7 +1655,7 @@ document.addEventListener("input", (event) => {
   }
 });
 
-dom.mapperDialog.addEventListener("click", (event) => {
+dom.mapperDialog?.addEventListener("click", (event) => {
   if (event.target === dom.mapperDialog) closeMapper();
 });
 

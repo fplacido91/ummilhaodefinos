@@ -506,6 +506,40 @@ svg {
   padding: 54px 5.2vw 80px;
 }
 
+.admin-review-shell {
+  width: min(1400px, 100%);
+  margin: 0 auto;
+  padding: 48px 5.2vw 80px;
+}
+
+.admin-review-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 30px;
+  margin-bottom: 38px;
+}
+
+.admin-review-header h1 {
+  margin: 0;
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: clamp(36px, 5vw, 64px);
+  font-weight: 600;
+  letter-spacing: -0.06em;
+  line-height: 0.98;
+}
+
+.admin-review-header h1 em {
+  color: var(--rust);
+  font-style: italic;
+}
+
+.admin-review-header .page-description {
+  max-width: 680px;
+  margin: 16px 0 0;
+}
+
 .view {
   display: none;
   animation: view-in 300ms ease both;
@@ -2396,6 +2430,34 @@ tbody tr.clickable-row:hover {
   white-space: nowrap;
 }
 
+.thumbnail-cell {
+  width: 58px;
+  padding-top: 8px !important;
+  padding-bottom: 8px !important;
+}
+
+.thumbnail-cell a {
+  display: block;
+  width: 42px;
+  height: 42px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #efe9df;
+}
+
+.detail-thumbnail {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 180ms ease;
+}
+
+.thumbnail-cell a:hover .detail-thumbnail {
+  transform: scale(1.08);
+}
+
 .bucket-cell {
   color: var(--ink-faint);
   font-family: var(--mono);
@@ -2835,9 +2897,16 @@ tbody tr.clickable-row:hover {
 
 @media (max-width: 620px) {
   .topbar,
-  .content-wrap {
+  .content-wrap,
+  .admin-review-shell {
     padding-right: 18px;
     padding-left: 18px;
+  }
+
+  .admin-review-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 18px;
   }
 
   .topbar-actions {
