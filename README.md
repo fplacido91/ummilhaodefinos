@@ -30,15 +30,15 @@ A implementação em `app.js` trata os casos da exportação do WhatsApp que alt
 - O painel mostra ficheiros de imagem antes da deduplicação, total contado e registos duplicados removidos. Candidatos a duplicado continuam disponíveis na auditoria visual com os dois lados do par; uma decisão manual pode restaurá-los ou confirmá-los.
 - Números isolados servem apenas para mostrar o último ponto de controlo manual coerente. Um valor isolado fora da sequência não é usado como máximo; nunca alteram a atribuição nem a classificação.
 - Um dia decorre das 08:00 às 08:00 do dia seguinte. Fotografias antes das 08:00 pertencem ao período anterior.
-- Telefones são normalizados removendo todos os caracteres que não sejam dígitos. Nomes guardados no chat não são associados automaticamente a nomes do CSV; aparecem como **Apenas nome · pendente** até serem resolvidos manualmente.
-- As associações nome → telefone ficam guardadas no armazenamento local e são reutilizadas em futuras importações.
+- Telefones são normalizados removendo todos os caracteres que não sejam dígitos. Os participantes aparecem por telefone; nomes do chat são associados automaticamente apenas quando correspondem exatamente a um contacto com um único número.
+- Nomes sem uma correspondência telefónica única aparecem como **Telefone em falta** nas vistas públicas. As associações manuais nome → telefone ficam guardadas no armazenamento local e são reutilizadas em futuras importações.
 - Uma nova exportação substitui os registos atuais e recalcula todas as classificações; nunca é acrescentada à anterior.
 
 ## Vistas
 
 - **Visão geral** — total acumulado, progresso até 1 000 000, verificação pós-importação, top 10 total e top 10 do último período diário.
 - **Janela diária** — classificação selecionável por períodos das 08:00 às 08:00.
-- **Participantes** — lista pesquisável e ordenável com o estado da identidade.
+- **Participantes** — lista pesquisável e ordenável por telefone, com o estado da identidade.
 - **Detalhe do participante** — registo paginado com miniatura, data, hora, nome original do ficheiro, período e totais por dia.
 
 ## Revisão privada

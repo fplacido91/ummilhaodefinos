@@ -207,10 +207,12 @@ function formatBucketLabel(dayKey, compact = false) {
   return `${formatDate(start)} 08:00 → ${formatShortDate(end)} 08:00`;
 }
 
+function participantPhone(participant) {
+  return normalizePhone(participant.phone || participant.mappedPhone || participant.member?.phone || "");
+}
+
 function publicParticipantName(participant) {
-  if (PRIVATE_ADMIN) return participant.displayName;
-  if (participant.member?.name) return participant.member.name;
-  return participant.senderType === "phone" ? (participant.displayName || participant.phone || "Participante") : participant.displayName;
+  return participantPhone(participant) || "Telefone em falta";
 }
 
 function formatIdentitySubtitle(participant) {
@@ -795,7 +797,7 @@ function buildDemoState() {
   };
 }
 
-function resolveParticipantMatch(participant, contactsByPhone) {
+function resolveParticipantMatch(participant, contactsByPhone, contactsByName) {
   if (participant.senderType === "phone") {
     const member = contactsByPhone.get(participant.phone);
     return {
@@ -806,14 +808,18 @@ function resolveParticipantMatch(participant, contactsByPhone) {
     };
   }
 
-  const mappedPhone = normalizePhone(appState.manualMappings[participant.senderKey] || "");
+  const manualPhone = normalizePhone(appState.manualMappings[participant.senderKey] || "");
+  const contactMatches = contactsByName.get(normalizeName(participant.displayName)) || [];
+  const autoPhone = contactMatches.length === 1 ? contactMatches[0] : "";
+  const mappedPhone = manualPhone || autoPhone;
   if (mappedPhone) {
     const member = contactsByPhone.get(mappedPhone);
     return {
       ...participant,
       member: member || null,
+      phone: mappedPhone,
       mappedPhone,
-      matchStatus: member ? "mapped" : "mapped-unknown",
+      matchStatus: member ? (manualPhone ? "mapped" : "matched") : "mapped-unknown",
     };
   }
 
@@ -826,7 +832,16 @@ function resolveParticipantMatch(participant, contactsByPhone) {
 }
 
 function refreshDerived() {
-  const contactsByPhone = new Map(appState.contacts.filter((contact) => contact.phone).map((contact) => [contact.phone, contact]));
+  const contactsWithPhones = appState.contacts.filter((contact) => contact.phone);
+  const contactsByPhone = new Map(contactsWithPhones.map((contact) => [contact.phone, contact]));
+  const contactsByName = new Map();
+  contactsWithPhones.forEach((contact) => {
+    const key = normalizeName(contact.name);
+    if (!key) return;
+    const phones = contactsByName.get(key) || [];
+    if (!phones.includes(contact.phone)) phones.push(contact.phone);
+    contactsByName.set(key, phones);
+  });
   const grouped = new Map();
 
   appState.records.forEach((record) => {
@@ -847,7 +862,7 @@ function refreshDerived() {
   });
 
   appState.participants = Array.from(grouped.values())
-    .map((participant) => resolveParticipantMatch(participant, contactsByPhone))
+    .map((participant) => resolveParticipantMatch(participant, contactsByPhone, contactsByName))
     .sort((first, second) => second.count - first.count || first.displayName.localeCompare(second.displayName));
 
   const dayKeys = [...new Set(appState.records.map((record) => record.dayKey).filter((key) => key !== "unknown"))].sort();
@@ -1047,9 +1062,9 @@ function renderParticipants() {
   }
   const identityHeader = PRIVATE_ADMIN ? "<th>Estado da identidade</th>" : "";
   const statusOption = PRIVATE_ADMIN ? `<option value="status" ${appState.participantSort === "status" ? "selected" : ""}>Estado da identidade</option>` : "";
-  const sortLabel = appState.participantSort === "count" ? "número de finos" : appState.participantSort === "name" ? "nome" : "estado da identidade";
+  const sortLabel = appState.participantSort === "count" ? "número de finos" : appState.participantSort === "name" ? "telefone" : "estado da identidade";
   dom.participantsMount.innerHTML = `
-    <div class="participants-toolbar"><div><h2>${formatNumber(appState.participants.length)} participante${appState.participants.length === 1 ? "" : "s"}</h2><p>${formatNumber(appState.stats.dedupedCount)} finos registados no arquivo atual.</p></div><div class="toolbar-tools"><div class="search-wrap"><label for="participantSearch">Encontrar o seu registo</label>${icon("search")}<input id="participantSearch" type="search" value="${escapeHtml(appState.participantSearch)}" placeholder="Procurar nome" /></div><div><label class="select-wrap-label" for="participantSort">Ordenar</label><select class="sort-select" id="participantSort"><option value="count" ${appState.participantSort === "count" ? "selected" : ""}>Mais finos</option><option value="name" ${appState.participantSort === "name" ? "selected" : ""}>Nome A–Z</option>${statusOption}</select></div></div></div>
+    <div class="participants-toolbar"><div><h2>${formatNumber(appState.participants.length)} participante${appState.participants.length === 1 ? "" : "s"}</h2><p>${formatNumber(appState.stats.dedupedCount)} finos registados no arquivo atual.</p></div><div class="toolbar-tools"><div class="search-wrap"><label for="participantSearch">Encontrar o seu registo</label>${icon("search")}<input id="participantSearch" type="search" value="${escapeHtml(appState.participantSearch)}" placeholder="Procurar telefone" /></div><div><label class="select-wrap-label" for="participantSort">Ordenar</label><select class="sort-select" id="participantSort"><option value="count" ${appState.participantSort === "count" ? "selected" : ""}>Mais finos</option><option value="name" ${appState.participantSort === "name" ? "selected" : ""}>Telefone A–Z</option>${statusOption}</select></div></div></div>
     <section class="table-card"><div class="table-scroll"><table><thead><tr><th>#</th><th>Participante</th><th>Finos</th>${identityHeader}</tr></thead><tbody id="participantsTableBody">${renderParticipantRows()}</tbody></table></div><div class="table-footer"><span>Ordenado por ${sortLabel}</span><span>Abra um remetente para consultar os envios</span></div></section>`;
 }
 
