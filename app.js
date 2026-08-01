@@ -15,6 +15,16 @@ const REPOSITORY_MEDIA_DIRECTORY = "Media";
 const MEDIA_BASE_URL = document.querySelector?.('meta[name="media-base-url"]')?.content || REPOSITORY_MEDIA_DIRECTORY;
 const PRIVATE_ADMIN = document.documentElement.dataset.siteMode === "admin";
 const REVIEW_PAGE_SIZE = 48;
+const KNOWN_NAME_PHONE_MAPPINGS = Object.freeze({
+  "erik juergens": "14406820268",
+  "francisco castro": "351938808797",
+  "diego armes": "351939351355",
+  "diogo amorim silva": "351911932288",
+  "bernardo ferro": "351912103090",
+  "justin young us phone us phone": "16144990702",
+  "miguel araujo": "351932666125",
+  "dominguinhos": "351938574212",
+});
 const numberFormat = new Intl.NumberFormat("pt-PT");
 const dateFormat = new Intl.DateTimeFormat("pt-PT", {
   day: "2-digit",
@@ -808,8 +818,9 @@ function resolveParticipantMatch(participant, contactsByPhone, contactsByName) {
     };
   }
 
-  const manualPhone = normalizePhone(appState.manualMappings[participant.senderKey] || "");
-  const contactMatches = contactsByName.get(normalizeName(participant.displayName)) || [];
+  const nameKey = normalizeName(participant.displayName);
+  const manualPhone = normalizePhone(appState.manualMappings[participant.senderKey] || KNOWN_NAME_PHONE_MAPPINGS[nameKey] || "");
+  const contactMatches = contactsByName.get(nameKey) || [];
   const autoPhone = contactMatches.length === 1 ? contactMatches[0] : "";
   const mappedPhone = manualPhone || autoPhone;
   if (mappedPhone) {
