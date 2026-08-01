@@ -27,7 +27,12 @@ const KNOWN_NAME_PHONE_MAPPINGS = Object.freeze({
   "ricardo almeida": "351916225165",
 });
 const PUBLIC_PHONE_NICKNAMES = Object.freeze({
-  "351914324122": "Bebado Anonymous",
+  "351912487086": "Andreblcosta",
+  "351912643624": "Max Verstappen",
+  "351938063574": "Eduardo Piggy",
+  "351916517325": "Pogacar",
+  "351938808797": "Kim Jong Fino",
+  "351914324122": "Anonymous",
 });
 const PHONE_COUNTRY_CODES = Object.freeze([
   "971", "420", "355", "353", "352", "351", "244", "258", "55", "54", "44", "43", "41", "39", "34", "1",
