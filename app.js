@@ -11,8 +11,7 @@ const REVIEW_DECISIONS_STORAGE_KEY = "um-milhao-de-finos-review-decisions-v1";
 const REPOSITORY_CHAT_FILE = "WhatsApp Chat with Um Milhão de Finos.txt";
 const REPOSITORY_CONTACTS_FILE = "contacts.csv";
 const REPOSITORY_REVIEW_FILE = "review-decisions.json";
-const REPOSITORY_MEDIA_DIRECTORY = "Media";
-const MEDIA_BASE_URL = document.querySelector?.('meta[name="media-base-url"]')?.content || REPOSITORY_MEDIA_DIRECTORY;
+const MEDIA_BASE_URL = document.querySelector?.('meta[name="media-base-url"]')?.content || "";
 const PRIVATE_ADMIN = document.documentElement.dataset.siteMode === "admin";
 const REVIEW_PAGE_SIZE = 48;
 const KNOWN_NAME_PHONE_MAPPINGS = Object.freeze({
@@ -1112,7 +1111,9 @@ function renderDetail() {
 }
 
 function mediaUrl(filename) {
-  return `${MEDIA_BASE_URL.replace(/\/+$/, "")}/${encodeURIComponent(filename)}`;
+  const encodedFilename = encodeURIComponent(filename);
+  if (!MEDIA_BASE_URL) return encodedFilename;
+  return `${MEDIA_BASE_URL.replace(/\/+$/, "")}/${encodedFilename}`;
 }
 
 function reviewDecisionLabel(decision) {

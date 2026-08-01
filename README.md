@@ -14,7 +14,9 @@ Depois abra <http://localhost:4173>. Ao iniciar, a aplicação carrega automatic
 
 - `WhatsApp Chat with Um Milhão de Finos.txt`
 - `contacts.csv`
-- `Media/` com os ficheiros de imagem originais
+- `review-decisions.json`
+
+As imagens são carregadas diretamente do DigitalOcean Spaces através do valor de `meta[name="media-base-url"]` em `index.html`.
 
 Para atualizar o registo de produção, substitua os ficheiros canónicos por uma nova exportação completa e recarregue a página. As ferramentas de preparação do arquivo não fazem parte da navegação pública. O chat, contactos e decisões são fontes de trabalho do administrador; não publique estes ficheiros sem confirmar que a exposição é aceitável.
 
@@ -50,6 +52,6 @@ A página pública não mostra a fila de auditoria. Para rever uma nova exporta�
 3. Use o filtro **Pares candidatos a duplicado**.
 4. Exporte as decisões e substitua `review-decisions.json` antes de publicar.
 
-`local-admin.html` e o arquivo `Media/` ficam ignorados pelo Git por defeito. As miniaturas usam o valor de `meta[name="media-base-url"]` em `index.html`; em produção, aponte-o para um bucket/CDN público do DigitalOcean Spaces em vez de colocar o arquivo inteiro no Git.
+`local-admin.html` fica ignorado pelo Git por defeito. Em produção, `meta[name="media-base-url"]` deve apontar para o bucket/CDN público do DigitalOcean Spaces; os ficheiros de media não devem ser colocados no Git.
 
 Para verificações rápidas na consola do navegador, a página expõe `window.UmMilhaoDeFinos.parseWhatsAppChat`, `parseContactsCsv`, `normalizePhone` e `dailyBucketKey`.
