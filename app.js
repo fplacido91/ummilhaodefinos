@@ -8,6 +8,7 @@ const TARGET_BEERS = 1_000_000;
 const MAPPINGS_STORAGE_KEY = "um-milhao-de-finos-name-mappings";
 const APP_STATE_STORAGE_KEY = "um-milhao-de-finos-app-state-v1";
 const REVIEW_DECISIONS_STORAGE_KEY = "um-milhao-de-finos-review-decisions-v1";
+const REVIEW_DECISIONS_MIGRATION_KEY = "um-milhao-de-finos-review-decisions-filename-duplicates-v1";
 const REPOSITORY_CHAT_FILE = "WhatsApp Chat with Um Milhão de Finos.txt";
 const REPOSITORY_CONTACTS_FILE = "contacts.csv";
 const REPOSITORY_REVIEW_FILE = "review-decisions.json";
@@ -23,7 +24,26 @@ const KNOWN_NAME_PHONE_MAPPINGS = Object.freeze({
   "justin young us phone us phone": "16144990702",
   "miguel araujo": "351932666125",
   "dominguinhos": "351938574212",
+  "ricardo almeida": "351916225165",
 });
+const PUBLIC_PHONE_NICKNAMES = Object.freeze({
+  "351914324122": "Bebado Anonymous",
+});
+const PHONE_COUNTRY_CODES = Object.freeze([
+  "971", "420", "355", "353", "352", "351", "244", "258", "55", "54", "44", "43", "41", "39", "34", "1",
+]);
+const EXCLUDED_PHONE_NUMBERS = new Set(["351917944881"]);
+const EXCLUDED_MEDIA_FILENAMES = new Set([
+  "img-20260731-wa0601.jpg",
+  "img-20260730-wa0687.jpg",
+]);
+const STALE_FILENAME_DUPLICATE_DECISION_IDS = Object.freeze([
+  "photo-2222-737",
+  "photo-2693-1001",
+  "photo-3044-1176",
+  "photo-4618-1942",
+  "photo-4996-2121",
+]);
 const numberFormat = new Intl.NumberFormat("pt-PT");
 const dateFormat = new Intl.DateTimeFormat("pt-PT", {
   day: "2-digit",
@@ -220,19 +240,27 @@ function participantPhone(participant) {
   return normalizePhone(participant.phone || participant.mappedPhone || participant.member?.phone || "");
 }
 
+function localPhoneNumber(value) {
+  const phone = normalizePhone(value);
+  const countryCode = PHONE_COUNTRY_CODES.find((code) => phone.startsWith(code) && phone.length - code.length >= 7);
+  return countryCode ? phone.slice(countryCode.length) : phone;
+}
+
 function publicParticipantName(participant) {
-  return participantPhone(participant) || "Telefone em falta";
+  const phone = participantPhone(participant);
+  if (!phone) return "Telefone em falta";
+  return PUBLIC_PHONE_NICKNAMES[phone] || localPhoneNumber(phone);
 }
 
 function formatIdentitySubtitle(participant) {
   if (participant.matchStatus === "mapped") {
-    return `associado · ${participant.member?.name || participant.mappedPhone}`;
+    return `associado · ${participant.member?.name || localPhoneNumber(participant.mappedPhone)}`;
   }
   if (participant.matchStatus === "matched") {
-    return participant.member?.name || participant.phone || "telefone associado";
+    return participant.member?.name || localPhoneNumber(participant.phone) || "telefone associado";
   }
   if (participant.senderType === "phone") {
-    return participant.phone || "remetente com telefone";
+    return localPhoneNumber(participant.phone) || "remetente com telefone";
   }
   return "nome identificado · falta associar telefone";
 }
@@ -290,6 +318,17 @@ function persistReviewDecisions() {
   }
 }
 
+function migrateFilenameDuplicateDecisions() {
+  try {
+    if (window.localStorage.getItem(REVIEW_DECISIONS_MIGRATION_KEY)) return;
+    STALE_FILENAME_DUPLICATE_DECISION_IDS.forEach((id) => delete appState.reviewDecisions[id]);
+    persistReviewDecisions();
+    window.localStorage.setItem(REVIEW_DECISIONS_MIGRATION_KEY, "1");
+  } catch {
+    STALE_FILENAME_DUPLICATE_DECISION_IDS.forEach((id) => delete appState.reviewDecisions[id]);
+  }
+}
+
 function applyReviewDecisions() {
   if (!appState.photoCandidates.length) return;
 
@@ -336,6 +375,7 @@ function serializeRecord(record) {
     messageIndex: record.messageIndex,
     duplicateCandidate: Boolean(record.duplicateCandidate),
     duplicateGroupId: record.duplicateGroupId || null,
+    duplicateReason: record.duplicateReason || null,
     reviewDecision: record.reviewDecision || null,
   };
 }
@@ -477,30 +517,52 @@ function parseWhatsAppChat(text) {
   pushCurrent();
 
   const mediaPattern = /^\s*((?:IMG|VID)-[\w-]+\.(?:jpg|jpeg|png|gif|mp4|3gp|mov))\s+\(file attached\)\s*$/i;
+  const removedMediaPattern = /^\s*\[(image|video) removed\]\s*$/i;
   let rawMediaCount = 0;
   let rawImageCount = 0;
   let rawVideoCount = 0;
+  let imageSequence = 0;
+  let videoSequence = 0;
   let duplicateCount = 0;
   let lastMedia = null;
   const records = [];
   const mediaRecords = [];
+  const filenameOwners = new Map();
 
   messages.forEach((message, messageIndex) => {
     const contentLines = message.content
       .split("\n")
       .map(stripWhatsAppFormatting);
     const firstContentLine = contentLines.find((line) => line.trim() !== "") || "";
+    const removedMediaMatch = firstContentLine.match(removedMediaPattern);
+    if (removedMediaMatch) {
+      if (removedMediaMatch[1].toLowerCase() === "video") videoSequence += 1;
+      else imageSequence += 1;
+      lastMedia = null;
+      return;
+    }
 
     const mediaMatch = firstContentLine.match(mediaPattern);
     if (!mediaMatch || !message.hasSender || !message.sender.trim()) return;
 
-    rawMediaCount += 1;
-    const mediaType = mediaMatch[1].toUpperCase().startsWith("VID-") ? "video" : "image";
-    const mediaSequence = mediaType === "video" ? (rawVideoCount += 1) : (rawImageCount += 1);
     const sender = identifySender(message.sender);
+    const filename = mediaMatch[1];
+    const mediaType = filename.toUpperCase().startsWith("VID-") ? "video" : "image";
+    const mediaSequence = mediaType === "video" ? (videoSequence += 1) : (imageSequence += 1);
+    if (
+      (sender.senderType === "phone" && EXCLUDED_PHONE_NUMBERS.has(sender.phone)) ||
+      EXCLUDED_MEDIA_FILENAMES.has(filename.toLowerCase())
+    ) {
+      lastMedia = null;
+      return;
+    }
+
+    rawMediaCount += 1;
+    if (mediaType === "video") rawVideoCount += 1;
+    else rawImageCount += 1;
     const media = {
       id: `${mediaType === "video" ? "video" : "photo"}-${messageIndex}-${mediaSequence}`,
-      filename: mediaMatch[1],
+      filename,
       mediaType,
       displayName: sender.displayName,
       senderType: sender.senderType,
@@ -512,23 +574,35 @@ function parseWhatsAppChat(text) {
       dayKey: dailyBucketKey(message.timestamp),
       messageIndex,
       duplicate: false,
+      duplicateCandidate: false,
       duplicateGroupId: null,
+      duplicateReason: null,
     };
 
-    // Compare consecutive media from the same sender. System notices and
-    // captions are allowed between records; a different sender breaks the
-    // sequence. Unreviewed media inside the two-minute window is excluded.
-    const isDuplicate = Boolean(
+    const filenameKey = media.filename.toLowerCase();
+    const filenameOwner = filenameOwners.get(filenameKey) || null;
+    const isTimeDuplicate = Boolean(
       lastMedia &&
       lastMedia.senderKey === media.senderKey &&
       withinDuplicateWindow(lastMedia, media),
     );
+    const isFilenameDuplicate = Boolean(filenameOwner);
+    const isDuplicate = isTimeDuplicate || isFilenameDuplicate;
     media.duplicateCandidate = isDuplicate;
+    media.duplicateReason = isTimeDuplicate && isFilenameDuplicate
+      ? "within-two-minutes-and-same-filename"
+      : isFilenameDuplicate
+        ? "same-filename"
+        : isTimeDuplicate
+          ? "within-two-minutes"
+          : null;
     if (isDuplicate) {
-      const duplicateGroupId = lastMedia.duplicateGroupId || `duplicate-group-${lastMedia.id}`;
-      lastMedia.duplicateGroupId = duplicateGroupId;
+      const duplicateSource = filenameOwner || lastMedia;
+      const duplicateGroupId = duplicateSource.duplicateGroupId || `duplicate-group-${duplicateSource.id}`;
+      duplicateSource.duplicateGroupId = duplicateGroupId;
       media.duplicateGroupId = duplicateGroupId;
     }
+    if (!filenameOwner) filenameOwners.set(filenameKey, media);
     mediaRecords.push(media);
 
     if (isDuplicate) {
@@ -907,7 +981,7 @@ function renderImportSummary() {
         <div class="import-summary-metric"><span>Candidatos duplicados</span><strong>${formatNumber(duplicateCount)}</strong></div>
       </div>
       <div class="dedupe-audit-line">
-        <span>${formatNumber(rawImageCount)} imagens + ${formatNumber(rawVideoCount)} vídeos encontrados</span><span>→</span><strong>${formatNumber(dedupedCount)} contados por defeito</strong><span>após remover</span><em>${formatNumber(duplicateCount)} candidato${duplicateCount === 1 ? "" : "s"} a duplicado dentro de dois minutos</em>${pendingDuplicateCount ? `<span>· ${formatNumber(pendingDuplicateCount)} pendentes</span>` : ""}${nonBeerCount ? `<span>· ${formatNumber(nonBeerCount)} não fino${nonBeerCount === 1 ? "" : "s"} excluído${nonBeerCount === 1 ? "" : "s"}</span>` : ""}${pendingReviewCount ? `<span>· ${formatNumber(pendingReviewCount)} por confirmar</span>` : ""}
+        <span>${formatNumber(rawImageCount)} imagens + ${formatNumber(rawVideoCount)} vídeos encontrados</span><span>→</span><strong>${formatNumber(dedupedCount)} contados por defeito</strong><span>após remover</span><em>${formatNumber(duplicateCount)} candidato${duplicateCount === 1 ? "" : "s"} automático${duplicateCount === 1 ? "" : "s"} a duplicado</em>${pendingDuplicateCount ? `<span>· ${formatNumber(pendingDuplicateCount)} pendentes</span>` : ""}${nonBeerCount ? `<span>· ${formatNumber(nonBeerCount)} não fino${nonBeerCount === 1 ? "" : "s"} excluído${nonBeerCount === 1 ? "" : "s"}</span>` : ""}${pendingReviewCount ? `<span>· ${formatNumber(pendingReviewCount)} por confirmar</span>` : ""}
       </div>
     </section>`;
 }
@@ -1023,9 +1097,12 @@ function sortParticipants(participants) {
 
 function renderParticipantRows() {
   const query = normalizeName(appState.participantSearch);
+  const rankById = new Map(appState.participants.map((participant, index) => [participant.id, index + 1]));
   const participants = sortParticipants(appState.participants).filter((participant) => {
     const name = publicParticipantName(participant);
-    const searchText = PRIVATE_ADMIN ? `${participant.displayName} ${participant.phone} ${participant.member?.name || ""}` : name;
+    const searchText = PRIVATE_ADMIN
+      ? `${participant.displayName} ${participant.phone} ${participant.member?.name || ""}`
+      : `${name} ${participantPhone(participant)}`;
     return !query || normalizeName(searchText).includes(query);
   });
   if (!participants.length) {
@@ -1035,7 +1112,7 @@ function renderParticipantRows() {
     .map((participant, index) => {
       const name = publicParticipantName(participant);
       const identity = PRIVATE_ADMIN ? `<span class="person-subline">${escapeHtml(formatIdentitySubtitle(participant))}</span>` : "";
-      return `<tr class="clickable-row" data-action="open-participant" data-id="${escapeHtml(participant.id)}"><td class="table-rank">${String(index + 1).padStart(2, "0")}</td><td><button class="table-person-button" data-action="open-participant" data-id="${escapeHtml(participant.id)}"><span class="person-copy"><span class="person-name">${escapeHtml(name)}</span>${identity}</span></button></td><td class="count-cell">${formatNumber(participant.count)}</td>${PRIVATE_ADMIN ? `<td>${statusHtml(participant)}</td>` : ""}</tr>`;
+      return `<tr class="clickable-row" data-action="open-participant" data-id="${escapeHtml(participant.id)}"><td class="table-rank">${String(rankById.get(participant.id) || index + 1).padStart(2, "0")}</td><td><button class="table-person-button" data-action="open-participant" data-id="${escapeHtml(participant.id)}"><span class="person-copy"><span class="person-name">${escapeHtml(name)}</span>${identity}</span></button></td><td class="count-cell">${formatNumber(participant.count)}</td>${PRIVATE_ADMIN ? `<td>${statusHtml(participant)}</td>` : ""}</tr>`;
     })
     .join("");
 }
@@ -1083,7 +1160,7 @@ function renderDetail() {
     : participant.matchStatus === "phone-unmatched"
       ? "O número do chat foi normalizado, mas não existe uma sequência de dígitos igual no CSV importado."
       : participant.member
-        ? `Contacto associado: ${participant.member.name} · ${participant.member.phoneRaw}`
+        ? `Contacto associado: ${participant.member.name} · ${localPhoneNumber(participant.member.phone)}`
         : "Este remetente tem uma associação telefónica guardada para futuras importações.");
   const rows = visibleRecords
     .map((record) => `<tr><td class="thumbnail-cell"><a href="${escapeHtml(mediaUrl(record.filename))}" target="_blank" rel="noreferrer" title="Abrir ${escapeHtml(record.filename)}">${record.mediaType === "video" ? `<video class="detail-thumbnail" src="${escapeHtml(mediaUrl(record.filename))}" muted preload="metadata" aria-label="${escapeHtml(record.filename)}"></video>` : `<img class="detail-thumbnail" src="${escapeHtml(mediaUrl(record.filename))}" alt="${escapeHtml(record.filename)}" loading="lazy" decoding="async" />`}</a></td><td>${escapeHtml(record.timestamp ? formatDate(record.timestamp) : record.dateText)}</td><td class="bucket-cell">${escapeHtml(record.timestamp ? formatTime(record.timestamp, record.timeText) : record.timeText)}</td><td class="filename-cell" title="${escapeHtml(record.filename)}">${escapeHtml(record.filename)}</td><td class="bucket-cell">${escapeHtml(formatBucketLabel(record.dayKey, true))}</td></tr>`)
@@ -1202,7 +1279,13 @@ function renderReview() {
     const groupMembers = record.duplicateGroupId ? duplicateGroups.get(record.duplicateGroupId) || [] : [];
     const duplicatePartner = groupMembers.find((member) => member.id !== record.id);
     const duplicateRole = record.duplicateCandidate
-      ? "Candidato a duplicado automático"
+      ? record.duplicateReason === "same-filename"
+        ? "Candidato a duplicado · nome de ficheiro repetido"
+        : record.duplicateReason === "within-two-minutes-and-same-filename"
+          ? "Candidato a duplicado · tempo e nome repetidos"
+          : record.duplicateReason === "within-two-minutes"
+            ? "Candidato a duplicado · dentro de dois minutos"
+            : "Candidato a duplicado automático"
       : record.duplicateGroupId
         ? "Original de um par automático"
         : "";
@@ -1318,7 +1401,7 @@ function renderMapper() {
     dom.mapperMount.innerHTML = `<div class="mapper-empty">Não há nomes guardados à espera de associação. Os remetentes com telefone são associados automaticamente pelos dígitos normalizados.</div>`;
     return;
   }
-  const contactOptions = appState.contacts.filter((contact) => contact.phone).map((contact) => `<option value="${escapeHtml(contact.phone)}">${escapeHtml(contact.name)} · ${escapeHtml(contact.phoneRaw || contact.phone)}</option>`).join("");
+  const contactOptions = appState.contacts.filter((contact) => contact.phone).map((contact) => `<option value="${escapeHtml(contact.phone)}">${escapeHtml(contact.name)} · ${escapeHtml(localPhoneNumber(contact.phone))}</option>`).join("");
   dom.mapperMount.innerHTML = people.map((participant) => {
     const currentMapping = appState.manualMappings[participant.senderKey] || "";
     const matchingContact = appState.contacts.find((contact) => contact.phone === normalizePhone(currentMapping));
@@ -1527,6 +1610,7 @@ async function loadRepositorySources() {
         appState.reviewDecisions = { ...repositoryDecisions, ...appState.reviewDecisions };
       }
     }
+    migrateFilenameDuplicateDecisions();
 
     const chatText = await chatResponse.text();
     const parsed = parseWhatsAppChat(chatText);

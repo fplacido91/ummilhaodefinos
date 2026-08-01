@@ -27,12 +27,12 @@ A implementação em `app.js` trata os casos da exportação do WhatsApp que alt
 - Os cabeçalhos `DD/MM/YYYY, HH:MM - ...` são lidos e as linhas sem cabeçalho são anexadas à mensagem anterior, como acontece com legendas multilinha.
 - Só contam linhas `IMG-*` (JPG, JPEG, PNG e GIF) e `VID-*` (MP4, 3GP e MOV), sem distinção entre maiúsculas e minúsculas. PTT, stickers (`STK-`, `.webp`) e outros anexos são ignorados.
 - Uma legenda — incluindo um número de contagem — pode aparecer numa linha sem data logo abaixo do anexo. O media é identificado pela própria linha do anexo, para que a legenda não o esconda.
-- Mensagens do sistema não têm remetente e não contam. A deduplicação compara fotografias consecutivas, permitindo mensagens do sistema, legendas e números pelo meio.
-- Media consecutivo do mesmo remetente dentro de dois minutos é candidato a duplicado. O candidato fica disponível para revisão e, sem decisão, é removido da contagem por defeito. Media de outro remetente quebra a sequência.
-- O painel mostra ficheiros de imagem antes da deduplicação, total contado e registos duplicados removidos. Candidatos a duplicado continuam disponíveis na auditoria visual com os dois lados do par; uma decisão manual pode restaurá-los ou confirmá-los.
+- Mensagens do sistema não têm remetente e não contam. A deduplicação compara media consecutivo, permitindo mensagens do sistema, legendas e números pelo meio.
+- Media consecutivo do mesmo remetente dentro de dois minutos, ou com o mesmo nome de ficheiro repetido, é candidato a duplicado. O candidato fica disponível para revisão e, sem decisão, é removido da contagem por defeito. Media de outro remetente quebra a sequência temporal.
+- O painel mostra ficheiros de media antes da deduplicação, total contado e registos duplicados removidos. Candidatos a duplicado continuam disponíveis na auditoria visual com os dois lados do par; uma decisão manual pode restaurá-los ou confirmá-los.
 - Números e legendas não alteram a atribuição nem a classificação. Só os anexos IMG/VID e as decisões da revisão contam.
 - Um dia decorre das 08:00 às 08:00 do dia seguinte. Fotografias antes das 08:00 pertencem ao período anterior.
-- Telefones são normalizados removendo todos os caracteres que não sejam dígitos. Os participantes aparecem por telefone; nomes do chat são associados automaticamente apenas quando correspondem exatamente a um contacto com um único número.
+- Telefones são normalizados removendo todos os caracteres que não sejam dígitos. As vistas públicas omitem o prefixo internacional; nomes públicos configurados podem substituir o telefone. Nomes do chat são associados automaticamente apenas quando correspondem exatamente a um contacto com um único número.
 - Nomes sem uma correspondência telefónica única aparecem como **Telefone em falta** nas vistas públicas. As associações manuais nome → telefone ficam guardadas no armazenamento local e são reutilizadas em futuras importações.
 - Uma nova exportação substitui os registos atuais e recalcula todas as classificações; nunca é acrescentada à anterior.
 
