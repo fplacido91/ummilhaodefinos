@@ -93,6 +93,7 @@ const appState = {
   contacts: [],
   contactsRestored: false,
   chatMessages: [],
+  latestDataTimestamp: null,
   stats: {
     rawPhotoCount: 0,
     rawImageCount: 0,
@@ -401,8 +402,9 @@ function serializeRecord(record) {
 
 function persistAppState() {
   try {
+    const isRepositorySource = appState.importMeta.chatFileName === REPOSITORY_CHAT_FILE;
     const snapshot = {
-      version: 1,
+      version: 2,
       mode: appState.mode,
       contacts: appState.contacts,
       importMeta: {
@@ -412,7 +414,10 @@ function persistAppState() {
           ? appState.importMeta.importedAt.toISOString()
           : null,
       },
-      ledger: appState.mode === "imported"
+      // The repository export is fetched on every load; serializing thousands
+      // of media records here only duplicates the canonical source and blocks
+      // the main thread with a large localStorage write.
+      ledger: appState.mode === "imported" && !isRepositorySource
         ? {
             records: appState.records.map(serializeRecord),
             photoCandidates: appState.photoCandidates.map(serializeRecord),
@@ -422,7 +427,7 @@ function persistAppState() {
     };
     window.localStorage.setItem(APP_STATE_STORAGE_KEY, JSON.stringify(snapshot));
   } catch {
-    // Large exports can exceed a browser's quota. The in-memory import still works.
+    // Large manual imports can exceed the browser's quota. The in-memory import still works.
   }
 }
 
@@ -431,7 +436,11 @@ function restoreAppState() {
     const raw = window.localStorage.getItem(APP_STATE_STORAGE_KEY);
     if (!raw) return false;
     const snapshot = JSON.parse(raw);
-    if (!snapshot || snapshot.version !== 1) return false;
+    if (!snapshot || ![1, 2].includes(snapshot.version)) return false;
+    if (snapshot.importMeta?.chatFileName === REPOSITORY_CHAT_FILE) {
+      window.localStorage.removeItem(APP_STATE_STORAGE_KEY);
+      return false;
+    }
 
     if (Array.isArray(snapshot.contacts)) {
       appState.contacts = snapshot.contacts;
@@ -635,6 +644,7 @@ function parseWhatsAppChat(text) {
 
   return {
     messages,
+    latestTimestamp: messages.at(-1)?.timestamp || null,
     records,
     photoRecords: mediaRecords,
     rawPhotoCount: rawMediaCount,
@@ -953,6 +963,7 @@ function refreshDerived() {
   if (appState.selectedParticipant && !appState.participants.some((person) => person.id === appState.selectedParticipant)) {
     appState.selectedParticipant = null;
   }
+  streakAnalyticsCache = null;
 }
 
 function buildDemoMessages() {
@@ -986,7 +997,7 @@ function shiftDayKey(dayKey, amount) {
 
 function getLatestDataTimestamp() {
   const timestamps = [
-    ...appState.chatMessages.map((message) => message.timestamp),
+    appState.latestDataTimestamp,
     ...appState.records.map((record) => record.timestamp),
   ].filter((timestamp) => timestamp instanceof Date && !Number.isNaN(timestamp.getTime()));
   return timestamps.reduce((latest, timestamp) => (!latest || timestamp > latest ? timestamp : latest), null);
@@ -1070,7 +1081,7 @@ function getParticipantStreak(participant, latestDayKey = getLatestDayKey()) {
   return { status: dayTotals.size ? "negative" : "none", value: dayTotals.size ? -gap : 0, allTime };
 }
 
-function getParticipantInsight(participant, latestDayKey = getLatestDayKey()) {
+function buildParticipantInsight(participant, latestDayKey) {
   const dayTotals = getParticipantDayTotalsMap(participant);
   const bestDay = [...dayTotals.entries()]
     .map(([dayKey, count]) => ({ dayKey, count }))
@@ -1080,7 +1091,16 @@ function getParticipantInsight(participant, latestDayKey = getLatestDayKey()) {
 }
 
 function getParticipantInsights(latestDayKey = getLatestDayKey()) {
-  return new Map(appState.participants.map((participant) => [participant.id, getParticipantInsight(participant, latestDayKey)]));
+  if (streakAnalyticsCache && streakAnalyticsCache.participants === appState.participants && streakAnalyticsCache.latestDayKey === latestDayKey) {
+    return streakAnalyticsCache.insights;
+  }
+  const insights = new Map(appState.participants.map((participant) => [participant.id, buildParticipantInsight(participant, latestDayKey)]));
+  streakAnalyticsCache = { participants: appState.participants, latestDayKey, insights };
+  return insights;
+}
+
+function getParticipantInsight(participant, latestDayKey = getLatestDayKey()) {
+  return getParticipantInsights(latestDayKey).get(participant.id) || buildParticipantInsight(participant, latestDayKey);
 }
 
 function getStreakRankings(latestDayKey = getLatestDayKey()) {
@@ -1094,8 +1114,9 @@ function getStreakRankings(latestDayKey = getLatestDayKey()) {
 }
 
 function getAllTimeStreakRankings() {
+  const insights = getParticipantInsights();
   return appState.participants
-    .map((participant) => ({ participant, ...getParticipantInsight(participant) }))
+    .map((participant) => ({ participant, ...insights.get(participant.id) }))
     .sort((first, second) => second.allTimeStreak - first.allTimeStreak || second.participant.count - first.participant.count || publicParticipantName(first.participant).localeCompare(publicParticipantName(second.participant)));
 }
 
@@ -1476,9 +1497,12 @@ function collectReviewMedia() {
 }
 
 function hydrateReviewMedia(previousMedia) {
+  reviewMediaObserver?.disconnect();
+  reviewMediaObserver = null;
   const grid = dom.reviewMount.querySelector(".review-grid");
   if (!grid) return;
 
+  const deferredMedia = [];
   grid.querySelectorAll(".review-card[data-id]").forEach((card) => {
     const media = card.querySelector("img, video");
     const previousMediaElement = previousMedia.get(card.dataset.id);
@@ -1487,12 +1511,29 @@ function hydrateReviewMedia(previousMedia) {
       media.replaceWith(previousMediaElement);
       return;
     }
-    if (media.dataset.src) {
-      media.src = media.dataset.src;
-      media.removeAttribute("data-src");
-      if (media.tagName === "VIDEO") media.load();
-    }
+    if (media.dataset.src) deferredMedia.push(media);
   });
+
+  const activate = (media, observer) => {
+    if (!media.dataset.src) return;
+    media.src = media.dataset.src;
+    media.removeAttribute("data-src");
+    observer?.unobserve(media);
+    if (media.tagName === "VIDEO") media.load();
+  };
+
+  if (typeof window.IntersectionObserver !== "function") {
+    deferredMedia.forEach((media) => activate(media, null));
+    return;
+  }
+
+  const observer = new window.IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) activate(entry.target, observer);
+    });
+  }, { rootMargin: "240px" });
+  reviewMediaObserver = observer;
+  deferredMedia.forEach((media) => observer.observe(media));
 }
 
 function renderReview() {
@@ -1670,6 +1711,8 @@ function saveMappings() {
 }
 
 let persistAppStateTimer = null;
+let reviewMediaObserver = null;
+let streakAnalyticsCache = null;
 
 function schedulePersistAppState() {
   window.clearTimeout(persistAppStateTimer);
@@ -1794,7 +1837,8 @@ async function importChatFile(file) {
     appState.mode = "imported";
     appState.photoCandidates = parsed.photoRecords;
     appState.records = parsed.records;
-    appState.chatMessages = parsed.messages;
+    appState.latestDataTimestamp = parsed.latestTimestamp;
+    appState.chatMessages = [];
     appState.stats = {
       rawPhotoCount: parsed.rawPhotoCount,
       rawImageCount: parsed.rawImageCount,
@@ -1857,7 +1901,8 @@ async function loadRepositorySources() {
     appState.mode = "imported";
     appState.photoCandidates = parsed.photoRecords;
     appState.records = parsed.records;
-    appState.chatMessages = parsed.messages;
+    appState.latestDataTimestamp = parsed.latestTimestamp;
+    appState.chatMessages = [];
     appState.stats = {
       rawPhotoCount: parsed.rawPhotoCount,
       rawImageCount: parsed.rawImageCount,
