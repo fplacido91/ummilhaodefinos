@@ -27,6 +27,7 @@ const KNOWN_NAME_PHONE_MAPPINGS = Object.freeze({
   "ricardo almeida": "351916225165",
 });
 const PUBLIC_PHONE_NICKNAMES = Object.freeze({
+  "14406820268": "The American",
   "351912487086": "Andreblcosta",
   "351912643624": "Max Verstappen",
   "351938063574": "Eduardo Piggy",
