@@ -60,6 +60,14 @@ const shortDateFormat = new Intl.DateTimeFormat("pt-PT", {
   day: "2-digit",
   month: "short",
 });
+const dateTimeFormat = new Intl.DateTimeFormat("pt-PT", {
+  day: "2-digit",
+  month: "short",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
 
 const dom = {
   overviewMount: document.getElementById("overviewMount"),
@@ -226,6 +234,11 @@ function formatDate(date) {
 function formatShortDate(date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "Desconhecido";
   return shortDateFormat.format(date);
+}
+
+function formatDateTime(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "Desconhecido";
+  return dateTimeFormat.format(date);
 }
 
 function formatTime(date, fallback = "—") {
@@ -964,6 +977,185 @@ function getDayRows(dayKey) {
     .sort((first, second) => second.count - first.count || publicParticipantName(first.participant).localeCompare(publicParticipantName(second.participant)));
 }
 
+function shiftDayKey(dayKey, amount) {
+  const date = dateFromDayKey(dayKey);
+  if (!date) return null;
+  date.setDate(date.getDate() + amount);
+  return dateKeyFromDate(date);
+}
+
+function getLatestDataTimestamp() {
+  const timestamps = [
+    ...appState.chatMessages.map((message) => message.timestamp),
+    ...appState.records.map((record) => record.timestamp),
+  ].filter((timestamp) => timestamp instanceof Date && !Number.isNaN(timestamp.getTime()));
+  return timestamps.reduce((latest, timestamp) => (!latest || timestamp > latest ? timestamp : latest), null);
+}
+
+function getDailyTotalRows() {
+  const totals = new Map();
+  appState.records.forEach((record) => {
+    if (record.dayKey === "unknown") return;
+    totals.set(record.dayKey, (totals.get(record.dayKey) || 0) + 1);
+  });
+  return [...totals.entries()]
+    .map(([dayKey, count]) => ({ dayKey, count }))
+    .sort((first, second) => first.dayKey.localeCompare(second.dayKey));
+}
+
+function getLatestDayKey() {
+  const latestTimestamp = getLatestDataTimestamp();
+  return latestTimestamp ? dailyBucketKey(latestTimestamp) : getDailyTotalRows().at(-1)?.dayKey || null;
+}
+
+function getParticipantDayTotalsMap(participant) {
+  const totals = new Map();
+  participant.records.forEach((record) => {
+    if (record.dayKey === "unknown") return;
+    totals.set(record.dayKey, (totals.get(record.dayKey) || 0) + 1);
+  });
+  return totals;
+}
+
+function getConsecutiveDays(dayTotals, startDayKey) {
+  let key = startDayKey;
+  let count = 0;
+  while (key && (dayTotals.get(key) || 0) > 0) {
+    count += 1;
+    key = shiftDayKey(key, -1);
+  }
+  return count;
+}
+
+function getAllTimeStreak(dayTotals) {
+  const days = [...dayTotals.keys()].sort();
+  let best = 0;
+  let run = 0;
+  let previous = null;
+
+  days.forEach((dayKey) => {
+    run = previous && shiftDayKey(previous, 1) === dayKey ? run + 1 : 1;
+    best = Math.max(best, run);
+    previous = dayKey;
+  });
+
+  return best;
+}
+
+function getParticipantStreak(participant, latestDayKey = getLatestDayKey()) {
+  const dayTotals = getParticipantDayTotalsMap(participant);
+  if (!latestDayKey) {
+    return { status: "none", value: 0, allTime: 0 };
+  }
+
+  const currentCount = dayTotals.get(latestDayKey) || 0;
+  const allTime = getAllTimeStreak(dayTotals);
+  if (currentCount > 0) {
+    return { status: "active", value: getConsecutiveDays(dayTotals, latestDayKey), allTime };
+  }
+
+  const previousDayKey = shiftDayKey(latestDayKey, -1);
+  const previousCount = dayTotals.get(previousDayKey) || 0;
+  if (previousCount > 0) {
+    return { status: "risk", value: getConsecutiveDays(dayTotals, previousDayKey), allTime };
+  }
+
+  let gap = 0;
+  let key = latestDayKey;
+  while (key && (dayTotals.get(key) || 0) === 0) {
+    gap += 1;
+    key = shiftDayKey(key, -1);
+  }
+
+  return { status: dayTotals.size ? "negative" : "none", value: dayTotals.size ? -gap : 0, allTime };
+}
+
+function getParticipantInsight(participant, latestDayKey = getLatestDayKey()) {
+  const dayTotals = getParticipantDayTotalsMap(participant);
+  const bestDay = [...dayTotals.entries()]
+    .map(([dayKey, count]) => ({ dayKey, count }))
+    .sort((first, second) => second.count - first.count || second.dayKey.localeCompare(first.dayKey))[0] || null;
+  const currentStreak = getParticipantStreak(participant, latestDayKey);
+  return { currentStreak, allTimeStreak: currentStreak.allTime, bestDay };
+}
+
+function getParticipantInsights(latestDayKey = getLatestDayKey()) {
+  return new Map(appState.participants.map((participant) => [participant.id, getParticipantInsight(participant, latestDayKey)]));
+}
+
+function getStreakRankings(latestDayKey = getLatestDayKey()) {
+  return appState.participants
+    .map((participant) => ({ participant, ...getParticipantInsight(participant, latestDayKey) }))
+    .sort((first, second) => (
+      second.currentStreak.value - first.currentStreak.value ||
+      second.allTimeStreak - first.allTimeStreak ||
+      publicParticipantName(first.participant).localeCompare(publicParticipantName(second.participant))
+    ));
+}
+
+function getAllTimeStreakRankings() {
+  return appState.participants
+    .map((participant) => ({ participant, ...getParticipantInsight(participant) }))
+    .sort((first, second) => second.allTimeStreak - first.allTimeStreak || second.participant.count - first.participant.count || publicParticipantName(first.participant).localeCompare(publicParticipantName(second.participant)));
+}
+
+function getDailyHighscores(limit = 10) {
+  const rows = [];
+  appState.participants.forEach((participant) => {
+    getParticipantDayTotalsMap(participant).forEach((count, dayKey) => rows.push({ participant, dayKey, count }));
+  });
+  return rows
+    .sort((first, second) => second.count - first.count || second.dayKey.localeCompare(first.dayKey) || publicParticipantName(first.participant).localeCompare(publicParticipantName(second.participant)))
+    .slice(0, limit);
+}
+
+function streakLabel(status) {
+  if (status === "active") return "ativo";
+  if (status === "risk") return "em risco";
+  if (status === "negative") return "negativo";
+  return "sem registo";
+}
+
+function streakValue(streak) {
+  if (!streak || streak.status === "none") return "—";
+  const sign = streak.value > 0 ? "+" : "−";
+  return `${sign}${formatNumber(Math.abs(streak.value))}`;
+}
+
+function streakValueHtml(streak) {
+  return `<span class="streak-value streak-${escapeHtml(streak.status)}"><strong>${escapeHtml(streakValue(streak))}</strong><small>${escapeHtml(streakLabel(streak.status))}</small></span>`;
+}
+
+function renderDailyTotalsChart(rows) {
+  if (!rows.length) return `<div class="chart-empty">Ainda não há dados diários suficientes para desenhar o ritmo do arquivo.</div>`;
+
+  const width = 1000;
+  const height = 300;
+  const left = 52;
+  const right = 22;
+  const top = 20;
+  const bottom = 48;
+  const chartWidth = width - left - right;
+  const chartHeight = height - top - bottom;
+  const max = Math.max(...rows.map((row) => row.count), 1);
+  const x = (index) => left + (rows.length === 1 ? chartWidth / 2 : (index / (rows.length - 1)) * chartWidth);
+  const y = (count) => top + chartHeight - (count / max) * chartHeight;
+  const points = rows.map((row, index) => `${x(index).toFixed(2)},${y(row.count).toFixed(2)}`);
+  const areaPath = `M ${x(0).toFixed(2)} ${top + chartHeight} L ${points.join(" L ")} L ${x(rows.length - 1).toFixed(2)} ${top + chartHeight} Z`;
+  const tickCount = 4;
+  const grid = Array.from({ length: tickCount + 1 }, (_, index) => {
+    const value = Math.round(max * (1 - index / tickCount));
+    const lineY = y(value).toFixed(2);
+    return `<line class="history-grid-line" x1="${left}" y1="${lineY}" x2="${width - right}" y2="${lineY}"></line><text class="history-axis-label" x="${left - 10}" y="${Number(lineY) + 3}" text-anchor="end">${escapeHtml(formatNumber(value))}</text>`;
+  }).join("");
+  const labelCount = Math.min(rows.length, 6);
+  const labelIndexes = [...new Set(Array.from({ length: labelCount }, (_, index) => Math.round(index * (rows.length - 1) / Math.max(labelCount - 1, 1))))];
+  const labels = labelIndexes.map((index) => `<text class="history-x-label" x="${x(index).toFixed(2)}" y="${height - 16}" text-anchor="middle">${escapeHtml(formatShortDate(dateFromDayKey(rows[index].dayKey)))}</text>`).join("");
+  const dots = rows.map((row, index) => `<circle class="history-point" cx="${x(index).toFixed(2)}" cy="${y(row.count).toFixed(2)}" r="${rows.length > 70 ? 2.2 : 3.5}"><title>${escapeHtml(formatBucketLabel(row.dayKey))}: ${escapeHtml(formatNumber(row.count))} finos</title></circle>`).join("");
+
+  return `<div class="history-chart"><svg viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="history-chart-title history-chart-description"><title id="history-chart-title">Total diário de finos</title><desc id="history-chart-description">Evolução do total de finos por período de 08:00 a 08:00.</desc>${grid}<path class="history-area" d="${areaPath}"></path><polyline class="history-line" points="${points.join(" ")}"></polyline>${dots}${labels}</svg></div>`;
+}
+
 function emptyStateHtml(title, body, action = "pick-chat") {
   return `<div class="empty-state"><div><div class="empty-icon">${icon("beer")}</div><h2>${escapeHtml(title)}</h2><p>${escapeHtml(body)}</p><button class="button button-primary" data-action="${action}">${icon("upload")} Importar uma exportação do chat</button></div></div>`;
 }
@@ -997,13 +1189,16 @@ function renderOverview() {
   const total = appState.stats.dedupedCount;
   const progress = Math.min(100, (total / TARGET_BEERS) * 100);
   const totalRanking = appState.participants.slice(0, 10).map((participant) => ({ participant, count: participant.count }));
-  const dayKeys = [...new Set(appState.records.map((record) => record.dayKey).filter((key) => key !== "unknown"))].sort().reverse();
-  const latestDayKey = dayKeys[0] || null;
+  const dailyRows = getDailyTotalRows();
+  const dayKeys = dailyRows.map((row) => row.dayKey);
+  const latestDayKey = getLatestDayKey();
   const latestDayRows = latestDayKey ? getDayRows(latestDayKey) : [];
-  const dailyRanking = latestDayRows.slice(0, 10);
   const latestDayTotal = latestDayRows.reduce((sum, row) => sum + row.count, 0);
+  const dailyHighscores = getDailyHighscores();
+  const currentStreaks = getStreakRankings(latestDayKey).slice(0, 10);
+  const allTimeStreaks = getAllTimeStreakRankings().slice(0, 10);
   const maxTotalCount = totalRanking[0]?.count || 1;
-  const maxDailyCount = dailyRanking[0]?.count || 1;
+  const dailyPeriodLabel = latestDayKey ? formatBucketLabel(latestDayKey, true) : "sem período datado";
   if (!appState.records.length) {
     dom.overviewMount.innerHTML = `${renderImportSummary()}${emptyStateHtml("O registo está com sede.", "Importe uma exportação completa do WhatsApp para transformar imagens e vídeos num fino auditável por envio.")}`;
     return;
@@ -1019,26 +1214,43 @@ function renderOverview() {
             <span class="rank-count">${formatNumber(count)} <small>finos</small></span>
           </button>`)
         .join("")
-    : `<div class="ranking-empty">Não há fotografias contadas neste período.</div>`;
-  const totalRankingRows = rankingRowsHtml(totalRanking, maxTotalCount);
-  const dailyRankingRows = rankingRowsHtml(dailyRanking, maxDailyCount);
-  const dailyPeriodLabel = latestDayKey ? formatBucketLabel(latestDayKey, true) : "sem período datado";
+    : `<div class="ranking-empty">Não há finos contados neste período.</div>`;
+
+  const scoreRowsHtml = (rows, kind) => rows.length
+    ? rows.map((row, index) => {
+      const currentStreak = row.currentStreak;
+      const value = kind === "daily"
+        ? formatNumber(row.count)
+        : kind === "current"
+          ? streakValue(currentStreak)
+          : `+${formatNumber(row.allTimeStreak)}`;
+      const detail = kind === "daily"
+        ? formatDate(dateFromDayKey(row.dayKey))
+        : kind === "current"
+          ? streakLabel(currentStreak)
+          : "melhor sequência";
+      const valueClass = kind === "current" ? ` streak-${currentStreak.status}` : "";
+      const suffix = kind === "daily" ? "finos" : "dias";
+      return `<button class="score-row" data-action="open-participant" data-id="${escapeHtml(row.participant.id)}" title="Abrir detalhe de ${escapeHtml(publicParticipantName(row.participant))}"><span class="score-rank">${String(index + 1).padStart(2, "0")}</span><span class="score-person"><strong>${escapeHtml(publicParticipantName(row.participant))}</strong><small>${escapeHtml(detail)}</small></span><span class="score-number${valueClass}"><strong>${escapeHtml(value)}</strong><small>${suffix}</small></span></button>`;
+    }).join("")
+    : `<div class="ranking-empty">Ainda não há sequências para comparar.</div>`;
 
   const sourceLabel = appState.mode === "demo" ? "Demonstração" : "Arquivo do grupo";
   const sourceDetail = appState.mode === "demo" ? "dados de exemplo" : "classificação pública atualizada";
   const publicMeta = `${formatNumber(appState.participants.length)} participantes · ${formatNumber(dayKeys.length)} períodos diários`;
+  const refreshedLabel = appState.importMeta.importedAt ? formatDateTime(appState.importMeta.importedAt) : "—";
 
   dom.overviewMount.innerHTML = `
     <div class="overview-meta-line">
       <span class="dataset-badge"><span class="status-pulse"></span><strong>${escapeHtml(sourceLabel)}</strong> · ${escapeHtml(sourceDetail || "exportação completa do chat")}</span>
-      <span class="fresh-import-label">${escapeHtml(publicMeta)}</span>
+      <span class="overview-meta-right"><span class="fresh-import-label">${escapeHtml(publicMeta)}</span><span class="overview-refresh"><small>Última atualização</small><strong>${escapeHtml(refreshedLabel)}</strong></span></span>
     </div>
     <div class="hero-grid"${appState.justImported || appState.mode === "imported" ? " style=\"margin-top:17px\"" : ""}>
       <article class="hero-card">
         <div class="hero-card-topline"><span>Total de finos</span>${icon("arrow-up-right")}</div>
         <div class="hero-number">${formatNumber(total)}<small>/ 1,000,000</small></div>
         <div class="hero-progress"><span style="width:${Math.max(0.42, progress)}%"></span></div>
-        <div class="hero-card-footer"><span><strong>${formatPercent(progress)}%</strong> do caminho percorrido</span><span>uma imagem ou vídeo · um fino</span></div>
+        <div class="hero-card-footer"><span><strong>${formatPercent(progress)}%</strong> do caminho percorrido</span><span>${escapeHtml(dailyPeriodLabel)}</span></div>
         <div class="hero-stamp">${icon("beer")}</div>
       </article>
       <div class="stat-stack">
@@ -1048,14 +1260,27 @@ function renderOverview() {
         <article class="summary-card"><div class="summary-card-topline"><span>Períodos diários</span>${icon("calendar")}</div><div class="summary-card-value">${formatNumber(dayKeys.length)}</div><div class="summary-card-foot">08:00 → 08:00</div></article>
       </div>
     </div>
-    <div class="dashboard-lower">
+    <section class="panel-card history-panel">
+      <div class="section-card-header"><div><p class="eyebrow">Ritmo do arquivo</p><h2>Total diário de finos</h2></div><span class="table-eyebrow">${escapeHtml(formatBucketLabel(latestDayKey || "unknown"))}</span></div>
+      ${renderDailyTotalsChart(dailyRows)}
+    </section>
+    <div class="dashboard-lower dashboard-highlights">
       <section class="panel-card ranking-panel">
         <div class="section-card-header"><div><p class="eyebrow">Classificação acumulada</p><h2>Ranking total · top 10</h2></div><button class="view-all" data-action="navigate" data-view="participants">Todos os participantes ${icon("arrow-right")}</button></div>
-        <div class="ranking-list">${totalRankingRows}</div>
+        <div class="ranking-list">${rankingRowsHtml(totalRanking, maxTotalCount)}</div>
       </section>
       <section class="panel-card ranking-panel">
-        <div class="section-card-header"><div><p class="eyebrow">Último período · ${escapeHtml(dailyPeriodLabel)}</p><h2>Ranking diário · top 10</h2></div><button class="view-all" data-action="navigate" data-view="daily">Ver contagens diárias ${icon("arrow-up-right")}</button></div>
-        <div class="ranking-list">${dailyRankingRows}</div>
+        <div class="section-card-header"><div><p class="eyebrow">Recordes de um período</p><h2>Daily highscores · top 10</h2></div><span class="table-eyebrow">08:00 → 08:00</span></div>
+        <div class="score-list">${scoreRowsHtml(dailyHighscores, "daily")}</div>
+      </section>
+      <section class="panel-card ranking-panel">
+        <div class="section-card-header"><div><p class="eyebrow">A sequência mais recente</p><h2>Streak atual · top 10</h2></div><span class="table-eyebrow">${escapeHtml(dailyPeriodLabel)}</span></div>
+        <div class="score-list">${scoreRowsHtml(currentStreaks, "current")}</div>
+        <div class="panel-note"><span class="streak-legend-dot streak-legend-active"></span> verde ativo · <span class="streak-legend-dot streak-legend-risk"></span> amarelo em risco · <span class="streak-legend-dot streak-legend-negative"></span> vermelho parado</div>
+      </section>
+      <section class="panel-card ranking-panel">
+        <div class="section-card-header"><div><p class="eyebrow">O melhor de sempre</p><h2>Streak highscores · all time</h2></div><span class="table-eyebrow">dias consecutivos</span></div>
+        <div class="score-list">${scoreRowsHtml(allTimeStreaks, "all-time")}</div>
       </section>
     </div>`;
 }
@@ -1104,6 +1329,7 @@ function sortParticipants(participants) {
 function renderParticipantRows() {
   const query = normalizeName(appState.participantSearch);
   const rankById = new Map(appState.participants.map((participant, index) => [participant.id, index + 1]));
+  const insights = getParticipantInsights();
   const participants = sortParticipants(appState.participants).filter((participant) => {
     const name = publicParticipantName(participant);
     const searchText = PRIVATE_ADMIN
@@ -1112,13 +1338,14 @@ function renderParticipantRows() {
     return !query || normalizeName(searchText).includes(query);
   });
   if (!participants.length) {
-    return `<tr><td colspan="${PRIVATE_ADMIN ? 4 : 3}"><div class="empty-state"><p>Nenhum participante corresponde a “${escapeHtml(appState.participantSearch)}”.</p></div></td></tr>`;
+    return `<tr><td colspan="${PRIVATE_ADMIN ? 6 : 5}"><div class="empty-state"><p>Nenhum participante corresponde a “${escapeHtml(appState.participantSearch)}”.</p></div></td></tr>`;
   }
   return participants
     .map((participant, index) => {
       const name = publicParticipantName(participant);
+      const insight = insights.get(participant.id);
       const identity = PRIVATE_ADMIN ? `<span class="person-subline">${escapeHtml(formatIdentitySubtitle(participant))}</span>` : "";
-      return `<tr class="clickable-row" data-action="open-participant" data-id="${escapeHtml(participant.id)}"><td class="table-rank">${String(rankById.get(participant.id) || index + 1).padStart(2, "0")}</td><td><button class="table-person-button" data-action="open-participant" data-id="${escapeHtml(participant.id)}"><span class="person-copy"><span class="person-name">${escapeHtml(name)}</span>${identity}</span></button></td><td class="count-cell">${formatNumber(participant.count)}</td>${PRIVATE_ADMIN ? `<td>${statusHtml(participant)}</td>` : ""}</tr>`;
+      return `<tr class="clickable-row" data-action="open-participant" data-id="${escapeHtml(participant.id)}"><td class="table-rank">${String(rankById.get(participant.id) || index + 1).padStart(2, "0")}</td><td><button class="table-person-button" data-action="open-participant" data-id="${escapeHtml(participant.id)}"><span class="person-copy"><span class="person-name">${escapeHtml(name)}</span>${identity}</span></button></td><td class="count-cell">${formatNumber(participant.count)}</td><td class="streak-cell">${streakValueHtml(insight.currentStreak)}</td><td class="streak-cell"><span class="alltime-streak"><strong>+${formatNumber(insight.allTimeStreak)}</strong><small>dias</small></span></td>${PRIVATE_ADMIN ? `<td>${statusHtml(participant)}</td>` : ""}</tr>`;
     })
     .join("");
 }
@@ -1132,9 +1359,10 @@ function renderParticipants() {
   const identityHeader = PRIVATE_ADMIN ? "<th>Estado da identidade</th>" : "";
   const statusOption = PRIVATE_ADMIN ? `<option value="status" ${appState.participantSort === "status" ? "selected" : ""}>Estado da identidade</option>` : "";
   const sortLabel = appState.participantSort === "count" ? "número de finos" : appState.participantSort === "name" ? "telefone" : "estado da identidade";
+  const latestDayKey = getLatestDayKey();
   dom.participantsMount.innerHTML = `
-    <div class="participants-toolbar"><div><h2>${formatNumber(appState.participants.length)} participante${appState.participants.length === 1 ? "" : "s"}</h2><p>${formatNumber(appState.stats.dedupedCount)} finos registados no arquivo atual.</p></div><div class="toolbar-tools"><div class="search-wrap"><label for="participantSearch">Encontrar o seu registo</label>${icon("search")}<input id="participantSearch" type="search" value="${escapeHtml(appState.participantSearch)}" placeholder="Procurar telefone" /></div><div><label class="select-wrap-label" for="participantSort">Ordenar</label><select class="sort-select" id="participantSort"><option value="count" ${appState.participantSort === "count" ? "selected" : ""}>Mais finos</option><option value="name" ${appState.participantSort === "name" ? "selected" : ""}>Telefone A–Z</option>${statusOption}</select></div></div></div>
-    <section class="table-card"><div class="table-scroll"><table><thead><tr><th>#</th><th>Participante</th><th>Finos</th>${identityHeader}</tr></thead><tbody id="participantsTableBody">${renderParticipantRows()}</tbody></table></div><div class="table-footer"><span>Ordenado por ${sortLabel}</span><span>Abra um remetente para consultar os envios</span></div></section>`;
+    <div class="participants-toolbar"><div><h2>${formatNumber(appState.participants.length)} participante${appState.participants.length === 1 ? "" : "s"}</h2><p>${formatNumber(appState.stats.dedupedCount)} finos registados · streak atual calculado até ${escapeHtml(latestDayKey ? formatBucketLabel(latestDayKey, true) : "ao último dado")}</p></div><div class="toolbar-tools"><div class="search-wrap"><label for="participantSearch">Encontrar o seu registo</label>${icon("search")}<input id="participantSearch" type="search" value="${escapeHtml(appState.participantSearch)}" placeholder="Procurar telefone" /></div><div><label class="select-wrap-label" for="participantSort">Ordenar</label><select class="sort-select" id="participantSort"><option value="count" ${appState.participantSort === "count" ? "selected" : ""}>Mais finos</option><option value="name" ${appState.participantSort === "name" ? "selected" : ""}>Telefone A–Z</option>${statusOption}</select></div></div></div>
+    <section class="table-card"><div class="table-scroll"><table><thead><tr><th>#</th><th>Participante</th><th>Finos</th><th>Streak atual</th><th>Melhor streak</th>${identityHeader}</tr></thead><tbody id="participantsTableBody">${renderParticipantRows()}</tbody></table></div><div class="table-footer"><span>Ordenado por ${sortLabel}</span><span>Verde ativo · amarelo em risco · vermelho negativo</span></div></section>`;
 }
 
 function participantDailyTotals(participant) {
@@ -1153,6 +1381,7 @@ function renderDetail() {
     dom.detailMount.innerHTML = emptyStateHtml("Escolha um participante.", "O detalhe abre quando clicar num remetente de uma classificação.", "navigate");
     return;
   }
+  const insight = getParticipantInsight(participant);
 
   const sortedRecords = [...participant.records].sort((first, second) => (second.timestamp?.getTime?.() || 0) - (first.timestamp?.getTime?.() || 0));
   const pageSize = 50;
@@ -1178,6 +1407,11 @@ function renderDetail() {
   dom.detailMount.innerHTML = `
     <button class="detail-back" data-action="navigate" data-view="participants">${icon("chevron-left")} Voltar aos participantes</button>
     <div class="detail-heading"><div class="detail-person"><div><p class="eyebrow">Detalhe do participante</p><h1 id="detail-title">${escapeHtml(publicParticipantName(participant))}</h1>${PRIVATE_ADMIN ? `<p>${escapeHtml(formatIdentitySubtitle(participant))}</p>${statusHtml(participant)}` : ""}</div></div><div class="detail-total"><span>Finos</span><strong>${formatNumber(participant.count)}</strong></div></div>
+    <div class="detail-streak-strip">
+      <div class="detail-streak-card"><span>Streak atual</span>${streakValueHtml(insight.currentStreak)}<small>até ${escapeHtml(getLatestDayKey() ? formatBucketLabel(getLatestDayKey(), true) : "ao último dado")}</small></div>
+      <div class="detail-streak-card"><span>Melhor streak</span><strong class="detail-streak-number">+${formatNumber(insight.allTimeStreak)}</strong><small>dias consecutivos no arquivo</small></div>
+      <div class="detail-streak-card"><span>Melhor dia</span><strong class="detail-streak-number">${formatNumber(insight.bestDay?.count || 0)}</strong><small>${escapeHtml(insight.bestDay ? formatBucketLabel(insight.bestDay.dayKey, true) : "sem período")}</small></div>
+    </div>
     <div class="detail-grid">
       <section class="detail-log-card"><div class="detail-card-header"><div><h2>Envios originais</h2><p>Cada linha corresponde a um ficheiro de media contado.</p></div><span class="mono-note">${formatNumber(participant.count)} total</span></div><div class="table-scroll"><table class="detail-log-table"><thead><tr><th>Media</th><th>Data</th><th>Hora</th><th>Nome original</th><th>Período das 08:00</th></tr></thead><tbody>${rows}</tbody></table></div><div class="pagination"><p>A mostrar ${formatNumber(start + 1)}–${formatNumber(Math.min(start + pageSize, sortedRecords.length))} de ${formatNumber(sortedRecords.length)}</p><div class="pagination-actions"><button class="icon-button" data-action="detail-page" data-page="${appState.detailPage - 1}" aria-label="Página anterior" ${appState.detailPage <= 1 ? "disabled" : ""}>${icon("chevron-left")}</button><button class="icon-button" data-action="detail-page" data-page="${appState.detailPage + 1}" aria-label="Página seguinte" ${appState.detailPage >= totalPages ? "disabled" : ""}>${icon("arrow-right")}</button></div></div></section>
       <aside><section class="detail-days-card"><div class="detail-card-header"><div><h2>Finos por dia</h2><p>O mesmo limite das 08:00, por remetente.</p></div></div><div class="detail-days-list">${dayRows || `<div class="empty-state"><p>Não há registos datados válidos.</p></div>`}</div>${dailyTotals.length > 10 ? `<div class="table-footer"><span>A mostrar os 10 períodos mais recentes</span><span>${formatNumber(dailyTotals.length)} no total</span></div>` : ""}</section>${PRIVATE_ADMIN ? `<div class="detail-contact-card"><h3>${participant.matchStatus === "name-only" ? "Nome identificado, telefone pendente" : "Resolução de identidade"}</h3><p>${escapeHtml(contactDescription)}</p></div>` : ""}</aside>
