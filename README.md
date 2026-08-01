@@ -1,6 +1,6 @@
 # Um Milhão de Finos
 
-Um registo auditável para o jogo do contador de finos do WhatsApp: uma **fotografia IMG deduplicada equivale a um fino**, atribuído ao remetente.
+Um registo auditável para o jogo do contador de finos do WhatsApp: uma **imagem ou vídeo deduplicado equivale a um fino**, atribuído ao remetente.
 
 ## Executar
 
@@ -25,12 +25,12 @@ Para atualizar o registo de produção, substitua os ficheiros canónicos por um
 A implementação em `app.js` trata os casos da exportação do WhatsApp que alteram a contagem:
 
 - Os cabeçalhos `DD/MM/YYYY, HH:MM - ...` são lidos e as linhas sem cabeçalho são anexadas à mensagem anterior, como acontece com legendas multilinha.
-- Só contam linhas `IMG-[\\w-]+.(jpg|jpeg|png) (file attached)`, sem distinção entre maiúsculas e minúsculas. Stickers (`STK-`, `.webp`), áudio (`.opus`), vídeo (`VID-*`) e outros anexos são ignorados.
-- Uma legenda de fotografia — incluindo um número de contagem — pode aparecer numa linha sem data logo abaixo do anexo. A fotografia é identificada pela própria linha do anexo, para que a legenda não a esconda.
+- Só contam linhas `IMG-*` (JPG, JPEG, PNG e GIF) e `VID-*` (MP4, 3GP e MOV), sem distinção entre maiúsculas e minúsculas. PTT, stickers (`STK-`, `.webp`) e outros anexos são ignorados.
+- Uma legenda — incluindo um número de contagem — pode aparecer numa linha sem data logo abaixo do anexo. O media é identificado pela própria linha do anexo, para que a legenda não o esconda.
 - Mensagens do sistema não têm remetente e não contam. A deduplicação compara fotografias consecutivas, permitindo mensagens do sistema, legendas e números pelo meio.
-- Fotografias consecutivas do mesmo remetente, na mesma data e no mesmo minuto, contam como um único fino. Uma fotografia de outro remetente quebra a sequência; outro minuto também.
+- Media consecutivo do mesmo remetente dentro de dois minutos é candidato a duplicado. O candidato fica disponível para revisão e, sem decisão, é removido da contagem por defeito. Media de outro remetente quebra a sequência.
 - O painel mostra ficheiros de imagem antes da deduplicação, total contado e registos duplicados removidos. Candidatos a duplicado continuam disponíveis na auditoria visual com os dois lados do par; uma decisão manual pode restaurá-los ou confirmá-los.
-- Números isolados servem apenas para mostrar o último ponto de controlo manual coerente. Um valor isolado fora da sequência não é usado como máximo; nunca alteram a atribuição nem a classificação.
+- Números e legendas não alteram a atribuição nem a classificação. Só os anexos IMG/VID e as decisões da revisão contam.
 - Um dia decorre das 08:00 às 08:00 do dia seguinte. Fotografias antes das 08:00 pertencem ao período anterior.
 - Telefones são normalizados removendo todos os caracteres que não sejam dígitos. Os participantes aparecem por telefone; nomes do chat são associados automaticamente apenas quando correspondem exatamente a um contacto com um único número.
 - Nomes sem uma correspondência telefónica única aparecem como **Telefone em falta** nas vistas públicas. As associações manuais nome → telefone ficam guardadas no armazenamento local e são reutilizadas em futuras importações.
@@ -41,7 +41,7 @@ A implementação em `app.js` trata os casos da exportação do WhatsApp que alt
 - **Visão geral** — total acumulado, progresso até 1 000 000, verificação pós-importação, top 10 total e top 10 do último período diário.
 - **Janela diária** — classificação selecionável por períodos das 08:00 às 08:00.
 - **Participantes** — lista pesquisável e ordenável por telefone, com o estado da identidade.
-- **Detalhe do participante** — registo paginado com miniatura, data, hora, nome original do ficheiro, período e totais por dia.
+- **Detalhe do participante** — registo paginado com media, data, hora, nome original do ficheiro, período e totais por dia.
 
 ## Revisão privada
 

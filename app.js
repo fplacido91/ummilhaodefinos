@@ -61,9 +61,11 @@ const appState = {
   chatMessages: [],
   stats: {
     rawPhotoCount: 0,
+    rawImageCount: 0,
+    rawVideoCount: 0,
     dedupedCount: 0,
     duplicateCount: 0,
-    manualTotal: null,
+    pendingDuplicateCount: 0,
   },
   importMeta: {
     chatFileName: "Demonstração",
@@ -292,7 +294,8 @@ function applyReviewDecisions() {
   if (!appState.photoCandidates.length) return;
 
   const accepted = [];
-  let duplicateCount = 0;
+  const duplicateCount = appState.photoCandidates.filter((candidate) => candidate.duplicateCandidate).length;
+  let pendingDuplicateCount = 0;
   let nonBeerCount = 0;
   let reviewedCount = 0;
 
@@ -303,7 +306,7 @@ function applyReviewDecisions() {
     if (decision === "non-beer") nonBeerCount += 1;
 
     const excludeAsDuplicate = candidate.duplicateCandidate && decision !== "beer" && decision !== "non-beer";
-    if (excludeAsDuplicate) duplicateCount += 1;
+    if (excludeAsDuplicate) pendingDuplicateCount += 1;
     if (!excludeAsDuplicate && decision !== "non-beer" && decision !== "duplicate") accepted.push(record);
   });
 
@@ -311,6 +314,7 @@ function applyReviewDecisions() {
   appState.stats.rawPhotoCount = appState.photoCandidates.length;
   appState.stats.dedupedCount = accepted.length;
   appState.stats.duplicateCount = duplicateCount;
+  appState.stats.pendingDuplicateCount = pendingDuplicateCount;
   appState.stats.nonBeerCount = nonBeerCount;
   appState.stats.reviewedCount = reviewedCount;
   appState.stats.pendingReviewCount = appState.photoCandidates.length - reviewedCount;
@@ -320,6 +324,7 @@ function serializeRecord(record) {
   return {
     id: record.id,
     filename: record.filename,
+    mediaType: record.mediaType || "image",
     displayName: record.displayName,
     senderType: record.senderType,
     phone: record.phone,
@@ -401,9 +406,11 @@ function restoreAppState() {
     });
     appState.stats = {
       rawPhotoCount: Number(snapshot.ledger.stats?.rawPhotoCount || 0),
+      rawImageCount: Number(snapshot.ledger.stats?.rawImageCount || snapshot.ledger.stats?.rawPhotoCount || 0),
+      rawVideoCount: Number(snapshot.ledger.stats?.rawVideoCount || 0),
       dedupedCount: Number(snapshot.ledger.stats?.dedupedCount || appState.records.length),
       duplicateCount: Number(snapshot.ledger.stats?.duplicateCount || 0),
-      manualTotal: snapshot.ledger.stats?.manualTotal ?? null,
+      pendingDuplicateCount: Number(snapshot.ledger.stats?.pendingDuplicateCount || snapshot.ledger.stats?.duplicateCount || 0),
       nonBeerCount: Number(snapshot.ledger.stats?.nonBeerCount || 0),
       reviewedCount: Number(snapshot.ledger.stats?.reviewedCount || 0),
       pendingReviewCount: Number(snapshot.ledger.stats?.pendingReviewCount || 0),
@@ -416,23 +423,18 @@ function restoreAppState() {
   }
 }
 
-function sameClockMinute(first, second) {
+function withinDuplicateWindow(first, second) {
   if (!first || !second) return false;
   if (!(first.timestamp instanceof Date) || !(second.timestamp instanceof Date)) return false;
-  return (
-    first.timestamp.getFullYear() === second.timestamp.getFullYear() &&
-    first.timestamp.getMonth() === second.timestamp.getMonth() &&
-    first.timestamp.getDate() === second.timestamp.getDate() &&
-    first.timestamp.getHours() === second.timestamp.getHours() &&
-    first.timestamp.getMinutes() === second.timestamp.getMinutes()
-  );
+  const elapsed = second.timestamp.getTime() - first.timestamp.getTime();
+  return elapsed >= 0 && elapsed <= 2 * 60 * 1000;
 }
 
 /**
  * Parse a WhatsApp export. A message header starts a record; lines without a
  * header are continuations of the preceding record (multiline messages are
  * common in exports). System records have no sender and are preserved for
- * ordering, but cannot produce beer records.
+ * ordering, but cannot produce media records.
  */
 function parseWhatsAppChat(text) {
   const lines = String(text ?? "")
@@ -474,14 +476,14 @@ function parseWhatsAppChat(text) {
   });
   pushCurrent();
 
-  const photoPattern = /^\s*(IMG-[\w-]+\.(?:jpg|jpeg|png))\s+\(file attached\)\s*$/i;
-  const bareNumberPattern = /^\s*\d+\s*$/;
-  let rawPhotoCount = 0;
+  const mediaPattern = /^\s*((?:IMG|VID)-[\w-]+\.(?:jpg|jpeg|png|gif|mp4|3gp|mov))\s+\(file attached\)\s*$/i;
+  let rawMediaCount = 0;
+  let rawImageCount = 0;
+  let rawVideoCount = 0;
   let duplicateCount = 0;
-  let lastPhoto = null;
+  let lastMedia = null;
   const records = [];
-  const photoRecords = [];
-  const manualTotals = [];
+  const mediaRecords = [];
 
   messages.forEach((message, messageIndex) => {
     const contentLines = message.content
@@ -489,24 +491,17 @@ function parseWhatsAppChat(text) {
       .map(stripWhatsAppFormatting);
     const firstContentLine = contentLines.find((line) => line.trim() !== "") || "";
 
-    // In a real export, a photo caption is often an un-timestamped
-    // continuation line. Scan each line for the manual tally, but identify a
-    // photo from the attachment line itself so captions cannot hide it.
-    if (message.hasSender) {
-      contentLines.forEach((line) => {
-        const numericLine = line.trim();
-        if (bareNumberPattern.test(numericLine)) manualTotals.push(Number(numericLine));
-      });
-    }
+    const mediaMatch = firstContentLine.match(mediaPattern);
+    if (!mediaMatch || !message.hasSender || !message.sender.trim()) return;
 
-    const photoMatch = firstContentLine.match(photoPattern);
-    if (!photoMatch || !message.hasSender || !message.sender.trim()) return;
-
-    rawPhotoCount += 1;
+    rawMediaCount += 1;
+    const mediaType = mediaMatch[1].toUpperCase().startsWith("VID-") ? "video" : "image";
+    const mediaSequence = mediaType === "video" ? (rawVideoCount += 1) : (rawImageCount += 1);
     const sender = identifySender(message.sender);
-    const photo = {
-      id: `photo-${messageIndex}-${rawPhotoCount}`,
-      filename: photoMatch[1],
+    const media = {
+      id: `${mediaType === "video" ? "video" : "photo"}-${messageIndex}-${mediaSequence}`,
+      filename: mediaMatch[1],
+      mediaType,
       displayName: sender.displayName,
       senderType: sender.senderType,
       phone: sender.phone,
@@ -520,43 +515,40 @@ function parseWhatsAppChat(text) {
       duplicateGroupId: null,
     };
 
-    // Compare against the immediately previous photo, not the previous line:
-    // system notices and captions are allowed between photo records. If a
-    // different sender has posted a photo, lastPhoto changes and no dedupe is
-    // applied across that boundary.
+    // Compare consecutive media from the same sender. System notices and
+    // captions are allowed between records; a different sender breaks the
+    // sequence. Unreviewed media inside the two-minute window is excluded.
     const isDuplicate = Boolean(
-      lastPhoto &&
-      lastPhoto.senderKey === photo.senderKey &&
-      sameClockMinute(lastPhoto, photo),
+      lastMedia &&
+      lastMedia.senderKey === media.senderKey &&
+      withinDuplicateWindow(lastMedia, media),
     );
-    photo.duplicateCandidate = isDuplicate;
+    media.duplicateCandidate = isDuplicate;
     if (isDuplicate) {
-      const duplicateGroupId = lastPhoto.duplicateGroupId || `duplicate-group-${lastPhoto.id}`;
-      lastPhoto.duplicateGroupId = duplicateGroupId;
-      photo.duplicateGroupId = duplicateGroupId;
+      const duplicateGroupId = lastMedia.duplicateGroupId || `duplicate-group-${lastMedia.id}`;
+      lastMedia.duplicateGroupId = duplicateGroupId;
+      media.duplicateGroupId = duplicateGroupId;
     }
-    photoRecords.push(photo);
+    mediaRecords.push(media);
 
     if (isDuplicate) {
       duplicateCount += 1;
-      photo.duplicate = true;
+      media.duplicate = true;
     } else {
-      records.push(photo);
+      records.push(media);
     }
-    lastPhoto = photo;
+    lastMedia = media;
   });
 
   return {
     messages,
     records,
-    photoRecords,
-    rawPhotoCount,
+    photoRecords: mediaRecords,
+    rawPhotoCount: rawMediaCount,
+    rawImageCount,
+    rawVideoCount,
     duplicateCount,
     dedupedCount: records.length,
-    // The export contains one obvious outlier (4476) in the middle of a
-    // running sequence that continues at 4076. Use the last manual checkpoint
-    // for the sanity-check display instead of the maximum outlier.
-    manualTotal: manualTotals.length ? manualTotals[manualTotals.length - 1] : null,
   };
 }
 
@@ -784,9 +776,10 @@ function buildDemoState() {
     contacts,
     stats: {
       rawPhotoCount: 4781,
+      rawImageCount: 4781,
+      rawVideoCount: 0,
       dedupedCount: records.length,
       duplicateCount: 4781 - records.length,
-      manualTotal: 4180,
     },
   };
 }
@@ -897,9 +890,7 @@ function emptyStateHtml(title, body, action = "pick-chat") {
 
 function renderImportSummary() {
   if (!appState.justImported && appState.mode !== "imported") return "";
-  const { rawPhotoCount, dedupedCount, manualTotal, duplicateCount, nonBeerCount = 0, pendingReviewCount = 0 } = appState.stats;
-  const difference = manualTotal === null ? null : manualTotal - dedupedCount;
-  const differenceLabel = difference === null ? "—" : `${difference > 0 ? "+" : ""}${formatNumber(difference)}`;
+  const { rawPhotoCount, rawImageCount = 0, rawVideoCount = 0, dedupedCount, duplicateCount, pendingDuplicateCount = 0, nonBeerCount = 0, pendingReviewCount = 0 } = appState.stats;
   const source = appState.importMeta.chatFileName || "Exportação do WhatsApp";
   return `
     <section class="import-summary" aria-label="Resumo após importação">
@@ -911,12 +902,12 @@ function renderImportSummary() {
         </div>
       </div>
       <div class="import-summary-values">
-        <div class="import-summary-metric"><span>Finos contados · fotografias</span><strong>${formatNumber(dedupedCount)}</strong></div>
-        <div class="import-summary-metric"><span>Último total manual do grupo</span><strong>${formatNumber(manualTotal)}</strong></div>
-        <div class="import-summary-metric"><span>Diferença</span><strong>${differenceLabel}</strong></div>
+        <div class="import-summary-metric"><span>Finos contados · media</span><strong>${formatNumber(dedupedCount)}</strong></div>
+        <div class="import-summary-metric"><span>Media encontrados</span><strong>${formatNumber(rawPhotoCount)}</strong></div>
+        <div class="import-summary-metric"><span>Candidatos duplicados</span><strong>${formatNumber(duplicateCount)}</strong></div>
       </div>
       <div class="dedupe-audit-line">
-        <span>${formatNumber(rawPhotoCount)} ficheiros de imagem encontrados</span><span>→</span><strong>${formatNumber(dedupedCount)} contados</strong><span>após remover</span><em>${formatNumber(duplicateCount)} registo${duplicateCount === 1 ? "" : "s"} duplicado${duplicateCount === 1 ? "" : "s"} do mesmo minuto</em>${nonBeerCount ? `<span>· ${formatNumber(nonBeerCount)} não fino${nonBeerCount === 1 ? "" : "s"} excluído${nonBeerCount === 1 ? "" : "s"}</span>` : ""}${pendingReviewCount ? `<span>· ${formatNumber(pendingReviewCount)} por confirmar</span>` : ""}
+        <span>${formatNumber(rawImageCount)} imagens + ${formatNumber(rawVideoCount)} vídeos encontrados</span><span>→</span><strong>${formatNumber(dedupedCount)} contados por defeito</strong><span>após remover</span><em>${formatNumber(duplicateCount)} candidato${duplicateCount === 1 ? "" : "s"} a duplicado dentro de dois minutos</em>${pendingDuplicateCount ? `<span>· ${formatNumber(pendingDuplicateCount)} pendentes</span>` : ""}${nonBeerCount ? `<span>· ${formatNumber(nonBeerCount)} não fino${nonBeerCount === 1 ? "" : "s"} excluído${nonBeerCount === 1 ? "" : "s"}</span>` : ""}${pendingReviewCount ? `<span>· ${formatNumber(pendingReviewCount)} por confirmar</span>` : ""}
       </div>
     </section>`;
 }
@@ -934,7 +925,7 @@ function renderOverview() {
   const maxTotalCount = totalRanking[0]?.count || 1;
   const maxDailyCount = dailyRanking[0]?.count || 1;
   if (!appState.records.length) {
-    dom.overviewMount.innerHTML = `${renderImportSummary()}${emptyStateHtml("O registo está com sede.", "Importe uma exportação completa do WhatsApp para transformar anexos de imagem num fino auditável por envio.")}`;
+    dom.overviewMount.innerHTML = `${renderImportSummary()}${emptyStateHtml("O registo está com sede.", "Importe uma exportação completa do WhatsApp para transformar imagens e vídeos num fino auditável por envio.")}`;
     return;
   }
 
@@ -967,7 +958,7 @@ function renderOverview() {
         <div class="hero-card-topline"><span>Total de finos</span>${icon("arrow-up-right")}</div>
         <div class="hero-number">${formatNumber(total)}<small>/ 1,000,000</small></div>
         <div class="hero-progress"><span style="width:${Math.max(0.42, progress)}%"></span></div>
-        <div class="hero-card-footer"><span><strong>${formatPercent(progress)}%</strong> do caminho percorrido</span><span>uma imagem · um fino</span></div>
+        <div class="hero-card-footer"><span><strong>${formatPercent(progress)}%</strong> do caminho percorrido</span><span>uma imagem ou vídeo · um fino</span></div>
         <div class="hero-stamp">${icon("beer")}</div>
       </article>
       <div class="stat-stack">
@@ -1052,7 +1043,7 @@ function renderParticipantRows() {
 function renderParticipants() {
   if (!dom.participantsMount) return;
   if (!appState.records.length) {
-    dom.participantsMount.innerHTML = emptyStateHtml("Ainda não há lista de participantes.", "Depois de importar um chat, todos os remetentes com uma imagem contada aparecem aqui.");
+    dom.participantsMount.innerHTML = emptyStateHtml("Ainda não há lista de participantes.", "Depois de importar um chat, todos os remetentes com media contado aparecem aqui.");
     return;
   }
   const identityHeader = PRIVATE_ADMIN ? "<th>Estado da identidade</th>" : "";
@@ -1095,7 +1086,7 @@ function renderDetail() {
         ? `Contacto associado: ${participant.member.name} · ${participant.member.phoneRaw}`
         : "Este remetente tem uma associação telefónica guardada para futuras importações.");
   const rows = visibleRecords
-    .map((record) => `<tr><td class="thumbnail-cell"><a href="${escapeHtml(mediaUrl(record.filename))}" target="_blank" rel="noreferrer" title="Abrir ${escapeHtml(record.filename)}"><img class="detail-thumbnail" src="${escapeHtml(mediaUrl(record.filename))}" alt="${escapeHtml(record.filename)}" loading="lazy" decoding="async" /></a></td><td>${escapeHtml(record.timestamp ? formatDate(record.timestamp) : record.dateText)}</td><td class="bucket-cell">${escapeHtml(record.timestamp ? formatTime(record.timestamp, record.timeText) : record.timeText)}</td><td class="filename-cell" title="${escapeHtml(record.filename)}">${escapeHtml(record.filename)}</td><td class="bucket-cell">${escapeHtml(formatBucketLabel(record.dayKey, true))}</td></tr>`)
+    .map((record) => `<tr><td class="thumbnail-cell"><a href="${escapeHtml(mediaUrl(record.filename))}" target="_blank" rel="noreferrer" title="Abrir ${escapeHtml(record.filename)}">${record.mediaType === "video" ? `<video class="detail-thumbnail" src="${escapeHtml(mediaUrl(record.filename))}" muted preload="metadata" aria-label="${escapeHtml(record.filename)}"></video>` : `<img class="detail-thumbnail" src="${escapeHtml(mediaUrl(record.filename))}" alt="${escapeHtml(record.filename)}" loading="lazy" decoding="async" />`}</a></td><td>${escapeHtml(record.timestamp ? formatDate(record.timestamp) : record.dateText)}</td><td class="bucket-cell">${escapeHtml(record.timestamp ? formatTime(record.timestamp, record.timeText) : record.timeText)}</td><td class="filename-cell" title="${escapeHtml(record.filename)}">${escapeHtml(record.filename)}</td><td class="bucket-cell">${escapeHtml(formatBucketLabel(record.dayKey, true))}</td></tr>`)
     .join("");
   const dayRows = dailyTotals.slice(0, 10)
     .map(({ dayKey, count }) => `<div class="day-total-row"><div><p>${escapeHtml(formatBucketLabel(dayKey, true))}</p><span>08:00 → next day 08:00</span></div><strong>${formatNumber(count)}</strong></div>`)
@@ -1105,7 +1096,7 @@ function renderDetail() {
     <button class="detail-back" data-action="navigate" data-view="participants">${icon("chevron-left")} Voltar aos participantes</button>
     <div class="detail-heading"><div class="detail-person"><div><p class="eyebrow">Detalhe do participante</p><h1 id="detail-title">${escapeHtml(publicParticipantName(participant))}</h1>${PRIVATE_ADMIN ? `<p>${escapeHtml(formatIdentitySubtitle(participant))}</p>${statusHtml(participant)}` : ""}</div></div><div class="detail-total"><span>Finos</span><strong>${formatNumber(participant.count)}</strong></div></div>
     <div class="detail-grid">
-      <section class="detail-log-card"><div class="detail-card-header"><div><h2>Envios originais</h2><p>Cada linha corresponde a um anexo IMG contado.</p></div><span class="mono-note">${formatNumber(participant.count)} total</span></div><div class="table-scroll"><table class="detail-log-table"><thead><tr><th>Imagem</th><th>Data</th><th>Hora</th><th>Nome original</th><th>Período das 08:00</th></tr></thead><tbody>${rows}</tbody></table></div><div class="pagination"><p>A mostrar ${formatNumber(start + 1)}–${formatNumber(Math.min(start + pageSize, sortedRecords.length))} de ${formatNumber(sortedRecords.length)}</p><div class="pagination-actions"><button class="icon-button" data-action="detail-page" data-page="${appState.detailPage - 1}" aria-label="Página anterior" ${appState.detailPage <= 1 ? "disabled" : ""}>${icon("chevron-left")}</button><button class="icon-button" data-action="detail-page" data-page="${appState.detailPage + 1}" aria-label="Página seguinte" ${appState.detailPage >= totalPages ? "disabled" : ""}>${icon("arrow-right")}</button></div></div></section>
+      <section class="detail-log-card"><div class="detail-card-header"><div><h2>Envios originais</h2><p>Cada linha corresponde a um ficheiro de media contado.</p></div><span class="mono-note">${formatNumber(participant.count)} total</span></div><div class="table-scroll"><table class="detail-log-table"><thead><tr><th>Media</th><th>Data</th><th>Hora</th><th>Nome original</th><th>Período das 08:00</th></tr></thead><tbody>${rows}</tbody></table></div><div class="pagination"><p>A mostrar ${formatNumber(start + 1)}–${formatNumber(Math.min(start + pageSize, sortedRecords.length))} de ${formatNumber(sortedRecords.length)}</p><div class="pagination-actions"><button class="icon-button" data-action="detail-page" data-page="${appState.detailPage - 1}" aria-label="Página anterior" ${appState.detailPage <= 1 ? "disabled" : ""}>${icon("chevron-left")}</button><button class="icon-button" data-action="detail-page" data-page="${appState.detailPage + 1}" aria-label="Página seguinte" ${appState.detailPage >= totalPages ? "disabled" : ""}>${icon("arrow-right")}</button></div></div></section>
       <aside><section class="detail-days-card"><div class="detail-card-header"><div><h2>Finos por dia</h2><p>O mesmo limite das 08:00, por remetente.</p></div></div><div class="detail-days-list">${dayRows || `<div class="empty-state"><p>Não há registos datados válidos.</p></div>`}</div>${dailyTotals.length > 10 ? `<div class="table-footer"><span>A mostrar os 10 períodos mais recentes</span><span>${formatNumber(dailyTotals.length)} no total</span></div>` : ""}</section>${PRIVATE_ADMIN ? `<div class="detail-contact-card"><h3>${participant.matchStatus === "name-only" ? "Nome identificado, telefone pendente" : "Resolução de identidade"}</h3><p>${escapeHtml(contactDescription)}</p></div>` : ""}</aside>
     </div>`;
 }
@@ -1159,40 +1150,41 @@ function getCurrentReviewPageRecords() {
   return filtered.slice(start, start + REVIEW_PAGE_SIZE);
 }
 
-function collectReviewImages() {
+function collectReviewMedia() {
   return new Map(
     [...dom.reviewMount.querySelectorAll(".review-card[data-id]")]
-      .map((card) => [card.dataset.id, card.querySelector("img")])
-      .filter(([, image]) => image),
+      .map((card) => [card.dataset.id, card.querySelector("img, video")])
+      .filter(([, media]) => media),
   );
 }
 
-function hydrateReviewImages(previousImages) {
+function hydrateReviewMedia(previousMedia) {
   const grid = dom.reviewMount.querySelector(".review-grid");
   if (!grid) return;
 
   grid.querySelectorAll(".review-card[data-id]").forEach((card) => {
-    const image = card.querySelector("img");
-    const previousImage = previousImages.get(card.dataset.id);
-    if (!image) return;
-    if (previousImage) {
-      image.replaceWith(previousImage);
+    const media = card.querySelector("img, video");
+    const previousMediaElement = previousMedia.get(card.dataset.id);
+    if (!media) return;
+    if (previousMediaElement) {
+      media.replaceWith(previousMediaElement);
       return;
     }
-    if (image.dataset.src) {
-      image.src = image.dataset.src;
-      image.removeAttribute("data-src");
+    if (media.dataset.src) {
+      media.src = media.dataset.src;
+      media.removeAttribute("data-src");
+      if (media.tagName === "VIDEO") media.load();
     }
   });
 }
 
 function renderReview() {
   if (!appState.photoCandidates.length) {
-    dom.reviewMount.innerHTML = emptyStateHtml("Ainda não há imagens para auditar.", "As imagens do repositório aparecem aqui depois de o chat ser carregado.");
+    dom.reviewMount.innerHTML = emptyStateHtml("Ainda não há media para auditar.", "Os ficheiros de media do repositório aparecem aqui depois de o chat ser carregado.");
     return;
   }
 
-  const previousImages = collectReviewImages();
+  const previousMedia = collectReviewMedia();
   const filtered = getFilteredReviewCandidates();
   const totalPages = Math.max(1, Math.ceil(filtered.length / REVIEW_PAGE_SIZE));
   appState.reviewPage = Math.min(Math.max(1, appState.reviewPage), totalPages);
@@ -1219,24 +1211,27 @@ function renderReview() {
     const decisionNote = decision ? `Decisão guardada: ${reviewDecisionLabel(decision)}${partnerNote}` : defaultNote;
     const stateLabel = decision ? reviewDecisionLabel(decision) : duplicateRole || reviewDecisionLabel(null);
     const stateClass = decision === "beer" ? "review-state-beer" : decision === "non-beer" ? "review-state-non-beer" : decision === "duplicate" || record.duplicateGroupId || record.duplicateCandidate ? "review-state-duplicate" : "review-state-pending";
+    const preview = record.mediaType === "video"
+      ? `<video class="review-media" data-src="${escapeHtml(mediaUrl(record.filename))}" aria-label="Pré-visualização de ${escapeHtml(record.filename)}" controls preload="none"></video>`
+      : `<img class="review-media" data-src="${escapeHtml(mediaUrl(record.filename))}" alt="Pré-visualização de ${escapeHtml(record.filename)}" loading="lazy" decoding="async" />`;
     return `<article class="review-card ${stateClass}" data-id="${escapeHtml(record.id)}">
-      <div class="review-image-wrap"><img data-src="${escapeHtml(mediaUrl(record.filename))}" alt="Pré-visualização de ${escapeHtml(record.filename)}" loading="lazy" decoding="async" /><span class="review-state">${escapeHtml(stateLabel)}</span></div>
+      <div class="review-image-wrap">${preview}<span class="review-state">${escapeHtml(stateLabel)}</span></div>
       <div class="review-card-body"><div class="review-card-meta"><strong>${escapeHtml(record.filename)}</strong><span>${escapeHtml(record.dateText)} · ${escapeHtml(record.timeText)}</span></div><p>${escapeHtml(record.displayName)} · ${escapeHtml(decisionNote)}</p><div class="review-actions"><button class="review-action review-action-beer" data-action="review-decision" data-id="${escapeHtml(record.id)}" data-decision="beer">Fino</button><button class="review-action review-action-non-beer" data-action="review-decision" data-id="${escapeHtml(record.id)}" data-decision="non-beer">Não é fino</button><button class="review-action review-action-duplicate" data-action="review-decision" data-id="${escapeHtml(record.id)}" data-decision="duplicate">Duplicado</button>${decision ? `<button class="review-clear" data-action="review-decision" data-id="${escapeHtml(record.id)}" data-decision="">Limpar</button>` : ""}</div></div>
     </article>`;
   }).join("");
 
-  dom.reviewMount.innerHTML = `<div class="review-summary"><div><span>Finos contados</span><strong>${formatNumber(appState.stats.dedupedCount)}</strong></div><div><span>Imagens pendentes</span><strong>${formatNumber(appState.photoCandidates.length - reviewed)}</strong></div><div><span>Candidatos a duplicado</span><strong>${formatNumber(duplicates)}</strong></div><div><span>Duplicados confirmados</span><strong>${formatNumber(confirmedDuplicates)}</strong></div><div><span>Excluídas como não fino</span><strong>${formatNumber(nonBeers)}</strong></div></div><div class="review-toolbar"><div><h2>Fila de auditoria</h2><p>Modo rápido: pode marcar as imagens desta página como finos antes de avançar. As imagens já vistas não são recarregadas.</p></div><div class="review-tools"><div class="search-wrap"><label for="reviewSearch">Procurar ficheiro ou remetente</label>${icon("search")}<input id="reviewSearch" type="search" value="${escapeHtml(appState.reviewSearch)}" placeholder="IMG-... ou nome" /></div><select class="sort-select" id="reviewFilter" aria-label="Filtrar auditoria"><option value="pending" ${appState.reviewFilter === "pending" ? "selected" : ""}>Pendentes</option><option value="duplicates" ${appState.reviewFilter === "duplicates" ? "selected" : ""}>Pares candidatos a duplicado</option><option value="duplicate" ${appState.reviewFilter === "duplicate" ? "selected" : ""}>Marcadas como duplicado</option><option value="reviewed" ${appState.reviewFilter === "reviewed" ? "selected" : ""}>Com decisão</option><option value="beer" ${appState.reviewFilter === "beer" ? "selected" : ""}>Marcadas como fino</option><option value="non-beer" ${appState.reviewFilter === "non-beer" ? "selected" : ""}>Marcadas como não fino</option><option value="all" ${appState.reviewFilter === "all" ? "selected" : ""}>Todas</option></select><button class="button button-primary review-bulk-button" data-action="review-bulk-beer" title="Marcar os pendentes desta página como finos" ${pendingVisible.length ? "" : "disabled"}>${icon("check")} Marcar imagens como finos</button><button class="button button-outline" data-action="export-review">${icon("file")} Exportar decisões</button></div></div><div class="review-grid">${cards || `<div class="empty-state"><p>Não há imagens neste filtro.</p></div>`}</div><div class="review-pagination"><p>A mostrar ${formatNumber(filtered.length ? start + 1 : 0)}–${formatNumber(Math.min(start + REVIEW_PAGE_SIZE, filtered.length))} de ${formatNumber(filtered.length)} imagens</p><div class="pagination-actions"><button class="icon-button" data-action="review-page" data-page="${appState.reviewPage - 1}" aria-label="Página anterior" ${appState.reviewPage <= 1 ? "disabled" : ""}>${icon("chevron-left")}</button><span>Página ${formatNumber(appState.reviewPage)} de ${formatNumber(totalPages)}</span><button class="icon-button" data-action="review-page" data-page="${appState.reviewPage + 1}" aria-label="Página seguinte" ${appState.reviewPage >= totalPages ? "disabled" : ""}>${icon("arrow-right")}</button></div></div>`;
-  hydrateReviewImages(previousImages);
+  dom.reviewMount.innerHTML = `<div class="review-summary"><div><span>Finos contados</span><strong>${formatNumber(appState.stats.dedupedCount)}</strong></div><div><span>Media pendente</span><strong>${formatNumber(appState.photoCandidates.length - reviewed)}</strong></div><div><span>Candidatos a duplicado</span><strong>${formatNumber(duplicates)}</strong></div><div><span>Duplicados confirmados</span><strong>${formatNumber(confirmedDuplicates)}</strong></div><div><span>Excluídas como não fino</span><strong>${formatNumber(nonBeers)}</strong></div></div><div class="review-toolbar"><div><h2>Fila de auditoria</h2><p>Modo rápido: pode marcar os ficheiros desta página como finos antes de avançar. Os ficheiros já vistos não são recarregados.</p></div><div class="review-tools"><div class="search-wrap"><label for="reviewSearch">Procurar ficheiro ou remetente</label>${icon("search")}<input id="reviewSearch" type="search" value="${escapeHtml(appState.reviewSearch)}" placeholder="IMG-/VID-... ou nome" /></div><select class="sort-select" id="reviewFilter" aria-label="Filtrar auditoria"><option value="pending" ${appState.reviewFilter === "pending" ? "selected" : ""}>Pendentes</option><option value="duplicates" ${appState.reviewFilter === "duplicates" ? "selected" : ""}>Pares candidatos a duplicado</option><option value="duplicate" ${appState.reviewFilter === "duplicate" ? "selected" : ""}>Marcadas como duplicado</option><option value="reviewed" ${appState.reviewFilter === "reviewed" ? "selected" : ""}>Com decisão</option><option value="beer" ${appState.reviewFilter === "beer" ? "selected" : ""}>Marcadas como fino</option><option value="non-beer" ${appState.reviewFilter === "non-beer" ? "selected" : ""}>Marcadas como não fino</option><option value="all" ${appState.reviewFilter === "all" ? "selected" : ""}>Todas</option></select><button class="button button-primary review-bulk-button" data-action="review-bulk-beer" title="Marcar o media pendente desta página como fino" ${pendingVisible.length ? "" : "disabled"}>${icon("check")} Marcar media como finos</button><button class="button button-outline" data-action="export-review">${icon("file")} Exportar decisões</button></div></div><div class="review-grid">${cards || `<div class="empty-state"><p>Não há media neste filtro.</p></div>`}</div><div class="review-pagination"><p>A mostrar ${formatNumber(filtered.length ? start + 1 : 0)}–${formatNumber(Math.min(start + REVIEW_PAGE_SIZE, filtered.length))} de ${formatNumber(filtered.length)} ficheiros de media</p><div class="pagination-actions"><button class="icon-button" data-action="review-page" data-page="${appState.reviewPage - 1}" aria-label="Página anterior" ${appState.reviewPage <= 1 ? "disabled" : ""}>${icon("chevron-left")}</button><span>Página ${formatNumber(appState.reviewPage)} de ${formatNumber(totalPages)}</span><button class="icon-button" data-action="review-page" data-page="${appState.reviewPage + 1}" aria-label="Página seguinte" ${appState.reviewPage >= totalPages ? "disabled" : ""}>${icon("arrow-right")}</button></div></div>`;
+  hydrateReviewMedia(previousMedia);
 }
 
 function renderImportsStatus() {
   if (!dom.importsStatus) return;
   if (!appState.records.length && appState.mode !== "imported") {
-    dom.importsStatus.innerHTML = `<div class="import-status-head"><div><h2>Ainda não foi importado nada</h2><p>A demonstração está visível no painel; a sua primeira importação .txt irá substituí-la.</p></div><span class="file-badge">${icon("file")} a aguardar</span></div><div class="import-status-grid"><div class="import-status-metric"><span>Ficheiros de imagem</span><strong>—</strong></div><div class="import-status-metric"><span>Finos contados</span><strong>—</strong></div><div class="import-status-metric"><span>Contactos carregados</span><strong>${formatNumber(appState.contacts.length)}</strong></div></div>`;
+    dom.importsStatus.innerHTML = `<div class="import-status-head"><div><h2>Ainda não foi importado nada</h2><p>A demonstração está visível no painel; a sua primeira importação .txt irá substituí-la.</p></div><span class="file-badge">${icon("file")} a aguardar</span></div><div class="import-status-grid"><div class="import-status-metric"><span>Ficheiros de media</span><strong>—</strong></div><div class="import-status-metric"><span>Finos contados</span><strong>—</strong></div><div class="import-status-metric"><span>Contactos carregados</span><strong>${formatNumber(appState.contacts.length)}</strong></div></div>`;
     return;
   }
   const imported = appState.mode === "imported";
-  dom.importsStatus.innerHTML = `<div class="import-status-head"><div><h2>${imported ? "Registo atual" : "Demonstração"}</h2><p>${escapeHtml(appState.importMeta.chatFileName || "Nenhum ficheiro de chat")}${appState.importMeta.importedAt ? ` · processado em ${escapeHtml(formatDate(appState.importMeta.importedAt))}` : ""}</p></div><span class="file-badge">${icon("check")} ${imported ? "processado" : "pré-visualização"}</span></div><div class="import-status-grid"><div class="import-status-metric"><span>Ficheiros de imagem encontrados</span><strong>${formatNumber(appState.stats.rawPhotoCount)}</strong></div><div class="import-status-metric"><span>Contados após deduplicação</span><strong>${formatNumber(appState.stats.dedupedCount)}</strong></div><div class="import-status-metric"><span>Contactos carregados</span><strong>${formatNumber(appState.contacts.length)}</strong></div></div><div class="import-status-foot"><span class="status-pulse"></span><span>${imported ? "Guardado localmente neste navegador. Uma nova exportação substitui este registo e recalcula todas as classificações." : "Esta demonstração permite explorar o registo antes de importar o seu arquivo."}</span></div>`;
+  dom.importsStatus.innerHTML = `<div class="import-status-head"><div><h2>${imported ? "Registo atual" : "Demonstração"}</h2><p>${escapeHtml(appState.importMeta.chatFileName || "Nenhum ficheiro de chat")}${appState.importMeta.importedAt ? ` · processado em ${escapeHtml(formatDate(appState.importMeta.importedAt))}` : ""}</p></div><span class="file-badge">${icon("check")} ${imported ? "processado" : "pré-visualização"}</span></div><div class="import-status-grid"><div class="import-status-metric"><span>Ficheiros de media encontrados</span><strong>${formatNumber(appState.stats.rawPhotoCount)}</strong></div><div class="import-status-metric"><span>Contados após deduplicação</span><strong>${formatNumber(appState.stats.dedupedCount)}</strong></div><div class="import-status-metric"><span>Contactos carregados</span><strong>${formatNumber(appState.contacts.length)}</strong></div></div><div class="import-status-foot"><span class="status-pulse"></span><span>${imported ? "Guardado localmente neste navegador. Uma nova exportação substitui este registo e recalcula todas as classificações." : "Esta demonstração permite explorar o registo antes de importar o seu arquivo."}</span></div>`;
 }
 
 function renderTopbarAndSidebar() {
@@ -1395,7 +1390,7 @@ function reviewConfirm(message) {
 function markCurrentReviewPageAsBeer() {
   const targets = getCurrentReviewPageRecords().filter((record) => !appState.reviewDecisions[record.id]);
   if (!targets.length) {
-    showToast("Não há imagens pendentes nesta página.");
+    showToast("Não há ficheiros de media pendentes nesta página.");
     return;
   }
 
@@ -1403,10 +1398,10 @@ function markCurrentReviewPageAsBeer() {
   const duplicateNote = duplicateCount
     ? `\n\nA seleção inclui ${duplicateCount} candidato${duplicateCount === 1 ? "" : "s"} a duplicado; marcá-lo${duplicateCount === 1 ? "" : "s"} como fino substitui a deduplicação automática.`
     : "";
-  if (!reviewConfirm(`Marcar ${targets.length} imagens desta página como finos?${duplicateNote}`)) return;
+  if (!reviewConfirm(`Marcar ${targets.length} ficheiros de media desta página como finos?${duplicateNote}`)) return;
 
   bulkSetReviewDecisions(targets.map((record) => record.id), "beer");
-  showToast(`<strong>${formatNumber(targets.length)} imagens marcadas como finos.</strong> A página foi preenchida com o próximo lote pendente.`);
+  showToast(`<strong>${formatNumber(targets.length)} ficheiros de media marcados como finos.</strong> A página foi preenchida com o próximo lote pendente.`);
 }
 
 function goToReviewPage(page) {
@@ -1419,7 +1414,7 @@ function goToReviewPage(page) {
       const duplicateNote = duplicateCount
         ? `\n\nInclui ${duplicateCount} candidato${duplicateCount === 1 ? "" : "s"} a duplicado.`
         : "";
-      const markAsBeer = reviewConfirm(`Esta página tem ${targets.length} imagens sem decisão. Quer marcá-las todas como finos antes de avançar?\n\nSim: marcar como fino e continuar.\nNão: avançar sem alterar.${duplicateNote}`);
+      const markAsBeer = reviewConfirm(`Esta página tem ${targets.length} ficheiros de media sem decisão. Quer marcá-los todos como finos antes de avançar?\n\nSim: marcar como fino e continuar.\nNão: avançar sem alterar.${duplicateNote}`);
       if (markAsBeer) {
         bulkSetReviewDecisions(targets.map((record) => record.id), "beer", { render: false });
         // Pending and duplicate queues refill the current page after removal;
@@ -1427,7 +1422,7 @@ function goToReviewPage(page) {
         appState.reviewPage = ["pending", "duplicates"].includes(appState.reviewFilter) ? currentPage : targetPage;
         renderTopbarAndSidebar();
         renderReview();
-        showToast(`<strong>${formatNumber(targets.length)} imagens marcadas como finos.</strong> A mostrar o próximo lote pendente.`);
+        showToast(`<strong>${formatNumber(targets.length)} ficheiros de media marcados como finos.</strong> A mostrar o próximo lote pendente.`);
         return;
       }
     }
@@ -1479,9 +1474,10 @@ async function importChatFile(file) {
     appState.chatMessages = parsed.messages;
     appState.stats = {
       rawPhotoCount: parsed.rawPhotoCount,
+      rawImageCount: parsed.rawImageCount,
+      rawVideoCount: parsed.rawVideoCount,
       dedupedCount: parsed.dedupedCount,
       duplicateCount: parsed.duplicateCount,
-      manualTotal: parsed.manualTotal,
     };
     applyReviewDecisions();
     appState.importMeta.chatFileName = file.name;
@@ -1492,7 +1488,7 @@ async function importChatFile(file) {
     refreshDerived();
     persistAppState();
     navigate("overview");
-    showToast(`<strong>${formatNumber(appState.stats.dedupedCount)} finos contados.</strong> ${formatNumber(appState.stats.duplicateCount)} duplicado${appState.stats.duplicateCount === 1 ? "" : "s"} automático${appState.stats.duplicateCount === 1 ? "" : "s"} removido${appState.stats.duplicateCount === 1 ? "" : "s"}.`);
+    showToast(`<strong>${formatNumber(appState.stats.dedupedCount)} finos contados.</strong> ${formatNumber(appState.stats.duplicateCount)} candidato${appState.stats.duplicateCount === 1 ? "" : "s"} a duplicado removido${appState.stats.duplicateCount === 1 ? "" : "s"}.`);
   } catch (error) {
     showToast("Não foi possível ler essa exportação. Confirme que é um ficheiro .txt UTF-8.");
     console.error(error);
@@ -1540,9 +1536,10 @@ async function loadRepositorySources() {
     appState.chatMessages = parsed.messages;
     appState.stats = {
       rawPhotoCount: parsed.rawPhotoCount,
+      rawImageCount: parsed.rawImageCount,
+      rawVideoCount: parsed.rawVideoCount,
       dedupedCount: parsed.dedupedCount,
       duplicateCount: parsed.duplicateCount,
-      manualTotal: parsed.manualTotal,
     };
     applyReviewDecisions();
     appState.importMeta.chatFileName = REPOSITORY_CHAT_FILE;
