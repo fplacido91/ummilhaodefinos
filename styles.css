@@ -1098,34 +1098,6 @@ svg {
   overflow: hidden;
 }
 
-.avatar {
-  display: grid;
-  width: 31px;
-  height: 31px;
-  flex: 0 0 auto;
-  place-items: center;
-  color: var(--night);
-  border-radius: 50%;
-  background: var(--amber-light);
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 500;
-}
-
-.avatar.avatar-rust {
-  color: var(--cream);
-  background: var(--rust);
-}
-
-.avatar.avatar-green {
-  background: var(--lime);
-}
-
-.avatar.avatar-dark {
-  color: var(--cream);
-  background: var(--night-soft);
-}
-
 .person-copy {
   min-width: 0;
   flex: 1 1 auto;
@@ -2314,12 +2286,6 @@ tbody tr.clickable-row:hover {
   display: flex;
   align-items: center;
   gap: 15px;
-}
-
-.detail-person .avatar {
-  width: 58px;
-  height: 58px;
-  font-size: 15px;
 }
 
 .detail-heading h1 {
