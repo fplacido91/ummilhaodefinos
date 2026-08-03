@@ -28,15 +28,25 @@ const KNOWN_NAME_PHONE_MAPPINGS = Object.freeze({
 });
 const PUBLIC_PHONE_NICKNAMES = Object.freeze({
   "351913946554": "Guiceps",
+  "913946554": "Guiceps",
   "14406820268": "The American",
+  "4406820268": "The American",
   "351912487086": "Andreblcosta",
+  "912487086": "Andreblcosta",
   "351912643624": "Max Verstappen",
+  "912643624": "Max Verstappen",
   "351938063574": "Eduardo Piggy",
+  "938063574": "Eduardo Piggy",
   "351916517325": "Pogacar",
+  "916517325": "Pogacar",
   "351938808797": "Kim Jong Fino",
+  "938808797": "Kim Jong Fino",
   "351967251443": "568mlHandicap",
+  "967251443": "568mlHandicap",
   "351934342019": "Zé Concertos",
+  "934342019": "Zé Concertos",
   "351914324122": "Anonymous",
+  "914324122": "Anonymous",
 });
 const PHONE_COUNTRY_CODES = Object.freeze([
   "971", "420", "355", "353", "352", "351", "244", "258", "55", "54", "44", "43", "41", "39", "34", "1",
