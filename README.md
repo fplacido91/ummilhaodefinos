@@ -27,8 +27,8 @@ A implementação em `app.js` trata os casos da exportação do WhatsApp que alt
 - Os cabeçalhos `DD/MM/YYYY, HH:MM - ...` são lidos e as linhas sem cabeçalho são anexadas à mensagem anterior, como acontece com legendas multilinha.
 - Só contam linhas `IMG-*` (JPG, JPEG, PNG e GIF) e `VID-*` (MP4, 3GP e MOV), sem distinção entre maiúsculas e minúsculas. PTT, stickers (`STK-`, `.webp`) e outros anexos são ignorados.
 - Uma legenda — incluindo um número de contagem — pode aparecer numa linha sem data logo abaixo do anexo. O media é identificado pela própria linha do anexo, para que a legenda não o esconda.
-- Mensagens do sistema não têm remetente e não contam. A deduplicação compara media consecutivo, permitindo mensagens do sistema, legendas e números pelo meio.
-- Media consecutivo do mesmo remetente dentro de dois minutos, ou com o mesmo nome de ficheiro repetido, é candidato a duplicado. O candidato fica disponível para revisão e, sem decisão, é removido da contagem por defeito. Media de outro remetente quebra a sequência temporal.
+- Mensagens do sistema não têm remetente e não contam. A deduplicação acompanha o último media de cada remetente, permitindo mensagens do sistema, legendas, números e outros remetentes pelo meio.
+- Media do mesmo remetente dentro de dois minutos, mesmo que outro remetente publique pelo meio, ou com o mesmo nome de ficheiro repetido, é candidato a duplicado. O candidato fica disponível para revisão e, sem decisão, é removido da contagem por defeito.
 - O painel mostra ficheiros de media antes da deduplicação, total contado e registos duplicados removidos. Candidatos a duplicado continuam disponíveis na auditoria visual com os dois lados do par; uma decisão manual pode restaurá-los ou confirmá-los.
 - Números e legendas não alteram a atribuição nem a classificação. Só os anexos IMG/VID e as decisões da revisão contam.
 - Um dia decorre das 08:00 às 08:00 do dia seguinte. Fotografias antes das 08:00 pertencem ao período anterior.

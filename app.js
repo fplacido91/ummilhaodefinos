@@ -34,6 +34,8 @@ const PUBLIC_PHONE_NICKNAMES = Object.freeze({
   "351938063574": "Eduardo Piggy",
   "351916517325": "Pogacar",
   "351938808797": "Kim Jong Fino",
+  "351967251443": "568mlHandicap",
+  "351934342019": "Zé Concertos",
   "351914324122": "Anonymous",
 });
 const PHONE_COUNTRY_CODES = Object.freeze([
@@ -553,10 +555,10 @@ function parseWhatsAppChat(text) {
   let imageSequence = 0;
   let videoSequence = 0;
   let duplicateCount = 0;
-  let lastMedia = null;
   const records = [];
   const mediaRecords = [];
   const filenameOwners = new Map();
+  const lastMediaBySender = new Map();
 
   messages.forEach((message, messageIndex) => {
     const contentLines = message.content
@@ -567,7 +569,7 @@ function parseWhatsAppChat(text) {
     if (removedMediaMatch) {
       if (removedMediaMatch[1].toLowerCase() === "video") videoSequence += 1;
       else imageSequence += 1;
-      lastMedia = null;
+      lastMediaBySender.clear();
       return;
     }
 
@@ -582,7 +584,7 @@ function parseWhatsAppChat(text) {
       (sender.senderType === "phone" && EXCLUDED_PHONE_NUMBERS.has(sender.phone)) ||
       EXCLUDED_MEDIA_FILENAMES.has(filename.toLowerCase())
     ) {
-      lastMedia = null;
+      lastMediaBySender.clear();
       return;
     }
 
@@ -610,10 +612,10 @@ function parseWhatsAppChat(text) {
 
     const filenameKey = media.filename.toLowerCase();
     const filenameOwner = filenameOwners.get(filenameKey) || null;
+    const previousSenderMedia = lastMediaBySender.get(media.senderKey) || null;
     const isTimeDuplicate = Boolean(
-      lastMedia &&
-      lastMedia.senderKey === media.senderKey &&
-      withinDuplicateWindow(lastMedia, media),
+      previousSenderMedia &&
+      withinDuplicateWindow(previousSenderMedia, media),
     );
     const isFilenameDuplicate = Boolean(filenameOwner);
     const isDuplicate = isTimeDuplicate || isFilenameDuplicate;
@@ -626,7 +628,7 @@ function parseWhatsAppChat(text) {
           ? "within-two-minutes"
           : null;
     if (isDuplicate) {
-      const duplicateSource = filenameOwner || lastMedia;
+      const duplicateSource = filenameOwner || previousSenderMedia;
       const duplicateGroupId = duplicateSource.duplicateGroupId || `duplicate-group-${duplicateSource.id}`;
       duplicateSource.duplicateGroupId = duplicateGroupId;
       media.duplicateGroupId = duplicateGroupId;
@@ -640,7 +642,7 @@ function parseWhatsAppChat(text) {
     } else {
       records.push(media);
     }
-    lastMedia = media;
+    lastMediaBySender.set(media.senderKey, media);
   });
 
   return {
