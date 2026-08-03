@@ -1475,6 +1475,7 @@ function getFilteredReviewCandidates() {
     const decision = appState.reviewDecisions[record.id] || null;
     const matchesQuery = !query || normalizeName(`${record.filename} ${record.displayName} ${record.phone}`).includes(query);
     if (!matchesQuery) return false;
+    if (decision === "duplicate" || decision === "non-beer") return false;
     if (appState.reviewFilter === "pending") return !decision;
     if (appState.reviewFilter === "duplicates") return Boolean(record.duplicateGroupId || record.duplicateCandidate);
     if (appState.reviewFilter === "duplicate") return decision === "duplicate";
