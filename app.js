@@ -1903,6 +1903,7 @@ async function importChatFile(file) {
     appState.justImported = true;
     appState.selectedParticipant = null;
     appState.detailPage = 1;
+    appState.selectedDay = null;
     refreshDerived();
     persistAppState();
     navigate("overview");
@@ -1967,6 +1968,7 @@ async function loadRepositorySources() {
     appState.justImported = false;
     appState.selectedParticipant = null;
     appState.detailPage = 1;
+    appState.selectedDay = null;
 
     if (contactsResponse.ok) {
       appState.contacts = parseContactsCsv(await contactsResponse.text());
