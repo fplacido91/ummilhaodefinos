@@ -47,6 +47,8 @@ const PUBLIC_PHONE_NICKNAMES = Object.freeze({
   "934342019": "Zé Concertos",
   "351914324122": "Anonymous",
   "914324122": "Anonymous",
+  "351967687218": "Cinco Dois",
+  "967687218": "Cinco Dois",
 });
 const PHONE_COUNTRY_CODES = Object.freeze([
   "971", "420", "355", "353", "352", "351", "244", "258", "55", "54", "44", "43", "41", "39", "34", "1",
@@ -362,8 +364,40 @@ function migrateFilenameDuplicateDecisions() {
   }
 }
 
+function migrateReviewDecisionsToCurrentRecords() {
+  if (!appState.photoCandidates.length || !Object.keys(appState.reviewDecisions).length) return false;
+
+  const currentIdsByMessage = new Map(
+    appState.photoCandidates.map((record) => [`${record.mediaType}:${record.messageIndex}`, record.id]),
+  );
+  const migrated = {};
+  let changed = false;
+
+  Object.entries(appState.reviewDecisions).forEach(([id, decision]) => {
+    const match = id.match(/^(photo|video)-(\d+)-\d+$/);
+    if (!match) {
+      migrated[id] = decision;
+      return;
+    }
+
+    const mediaType = match[1] === "video" ? "video" : "image";
+    const currentId = currentIdsByMessage.get(`${mediaType}:${match[2]}`);
+    if (!currentId || currentId === id) {
+      migrated[id] = decision;
+      return;
+    }
+
+    if (!(currentId in migrated)) migrated[currentId] = decision;
+    changed = true;
+  });
+
+  if (changed) appState.reviewDecisions = migrated;
+  return changed;
+}
+
 function applyReviewDecisions() {
   if (!appState.photoCandidates.length) return;
+  if (migrateReviewDecisionsToCurrentRecords()) persistReviewDecisions();
 
   const accepted = [];
   const duplicateCount = appState.photoCandidates.filter((candidate) => candidate.duplicateCandidate).length;
