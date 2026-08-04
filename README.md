@@ -33,7 +33,7 @@ A implementação em `app.js` trata os casos da exportação do WhatsApp que alt
 - Números e legendas não alteram a atribuição nem a classificação. Só os anexos IMG/VID e as decisões da revisão contam.
 - Um dia decorre das 08:00 às 08:00 do dia seguinte. Fotografias antes das 08:00 pertencem ao período anterior.
 - Telefones são normalizados removendo todos os caracteres que não sejam dígitos. As vistas públicas omitem o prefixo internacional; nomes públicos configurados podem substituir o telefone. Nomes do chat são associados automaticamente apenas quando correspondem exatamente a um contacto com um único número.
-- Nomes sem uma correspondência telefónica única aparecem como **Telefone em falta** nas vistas públicas. As associações manuais nome → telefone ficam guardadas no armazenamento local e são reutilizadas em futuras importações.
+- Nomes sem uma correspondência telefónica única aparecem como **Telefone em falta** nas vistas públicas, salvo quando existe um alias público configurado. As associações manuais nome → telefone ficam guardadas no armazenamento local e são reutilizadas em futuras importações.
 - Uma nova exportação substitui os registos atuais e recalcula todas as classificações; nunca é acrescentada à anterior.
 
 ## Vistas

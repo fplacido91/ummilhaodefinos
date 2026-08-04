@@ -26,6 +26,9 @@ const KNOWN_NAME_PHONE_MAPPINGS = Object.freeze({
   "dominguinhos": "351938574212",
   "ricardo almeida": "351916225165",
 });
+const PUBLIC_NAME_ALIASES = Object.freeze({
+  "joao mendonca volkanov": "VOLKANOV",
+});
 const PUBLIC_PHONE_NICKNAMES = Object.freeze({
   "351913946554": "Guiceps",
   "913946554": "Guiceps",
@@ -283,7 +286,7 @@ function localPhoneNumber(value) {
 
 function publicParticipantName(participant) {
   const phone = participantPhone(participant);
-  if (!phone) return "Telefone em falta";
+  if (!phone) return PUBLIC_NAME_ALIASES[normalizeName(participant.displayName)] || "Telefone em falta";
   return PUBLIC_PHONE_NICKNAMES[phone] || localPhoneNumber(phone);
 }
 
