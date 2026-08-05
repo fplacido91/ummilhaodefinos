@@ -39,6 +39,7 @@ A implementação em `app.js` trata os casos da exportação do WhatsApp que alt
 ## Vistas
 
 - **Visão geral** — total acumulado, progresso até 1 000 000, verificação pós-importação, top 10 total e top 10 do último período diário.
+- **Estatísticas** — mapa de calor dia do período × hora, distribuição por hora do dia, totais semanais, calendário, participação, recordes globais e projeção da data do milhão com base na média dos últimos períodos.
 - **Janela diária** — classificação selecionável por períodos das 08:00 às 08:00.
 - **Participantes** — lista pesquisável e ordenável por telefone, com o estado da identidade.
 - **Detalhe do participante** — registo paginado com media, data, hora, nome original do ficheiro, período e totais por dia.

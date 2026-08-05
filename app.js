@@ -91,6 +91,7 @@ const dateTimeFormat = new Intl.DateTimeFormat("pt-PT", {
 
 const dom = {
   overviewMount: document.getElementById("overviewMount"),
+  statsMount: document.getElementById("statsMount"),
   dailyMount: document.getElementById("dailyMount"),
   participantsMount: document.getElementById("participantsMount"),
   reviewMount: document.getElementById("reviewMount"),
@@ -118,6 +119,7 @@ const appState = {
     rawPhotoCount: 0,
     rawImageCount: 0,
     rawVideoCount: 0,
+    omittedMediaCount: 0,
     dedupedCount: 0,
     duplicateCount: 0,
     pendingDuplicateCount: 0,
@@ -528,6 +530,7 @@ function restoreAppState() {
       rawPhotoCount: Number(snapshot.ledger.stats?.rawPhotoCount || 0),
       rawImageCount: Number(snapshot.ledger.stats?.rawImageCount || snapshot.ledger.stats?.rawPhotoCount || 0),
       rawVideoCount: Number(snapshot.ledger.stats?.rawVideoCount || 0),
+      omittedMediaCount: Number(snapshot.ledger.stats?.omittedMediaCount || 0),
       dedupedCount: Number(snapshot.ledger.stats?.dedupedCount || appState.records.length),
       duplicateCount: Number(snapshot.ledger.stats?.duplicateCount || 0),
       pendingDuplicateCount: Number(snapshot.ledger.stats?.pendingDuplicateCount || snapshot.ledger.stats?.duplicateCount || 0),
@@ -601,6 +604,7 @@ function parseWhatsAppChat(text) {
   let rawMediaCount = 0;
   let rawImageCount = 0;
   let rawVideoCount = 0;
+  let omittedMediaCount = 0;
   let imageSequence = 0;
   let videoSequence = 0;
   let duplicateCount = 0;
@@ -614,6 +618,10 @@ function parseWhatsAppChat(text) {
       .split("\n")
       .map(stripWhatsAppFormatting);
     const firstContentLine = contentLines.find((line) => line.trim() !== "") || "";
+    if (/^\s*<Media omitted>\s*$/i.test(firstContentLine)) {
+      omittedMediaCount += 1;
+      return;
+    }
     const removedMediaMatch = firstContentLine.match(removedMediaPattern);
     if (removedMediaMatch) {
       if (removedMediaMatch[1].toLowerCase() === "video") videoSequence += 1;
@@ -702,6 +710,7 @@ function parseWhatsAppChat(text) {
     rawPhotoCount: rawMediaCount,
     rawImageCount,
     rawVideoCount,
+    omittedMediaCount,
     duplicateCount,
     dedupedCount: records.length,
   };
@@ -933,6 +942,7 @@ function buildDemoState() {
       rawPhotoCount: 4781,
       rawImageCount: 4781,
       rawVideoCount: 0,
+      omittedMediaCount: 0,
       dedupedCount: records.length,
       duplicateCount: 4781 - records.length,
     },
@@ -1069,6 +1079,211 @@ function getDailyTotalRows() {
 function getLatestDayKey() {
   const latestTimestamp = getLatestDataTimestamp();
   return latestTimestamp ? dailyBucketKey(latestTimestamp) : getDailyTotalRows().at(-1)?.dayKey || null;
+}
+
+const GLOBAL_WEEKDAY_LABELS = Object.freeze(["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]);
+const GLOBAL_TIME_RANGES = Object.freeze([
+  { label: "08–12", start: 8, end: 12 },
+  { label: "12–18", start: 12, end: 18 },
+  { label: "18–00", start: 18, end: 24 },
+  { label: "00–08", start: 0, end: 8 },
+]);
+
+function weekStartKey(dayKey) {
+  const date = dateFromDayKey(dayKey);
+  if (!date) return "unknown";
+  const mondayIndex = (date.getDay() + 6) % 7;
+  date.setDate(date.getDate() - mondayIndex);
+  return dateKeyFromDate(date);
+}
+
+function formatWeekLabel(weekKey) {
+  const start = dateFromDayKey(weekKey);
+  if (!start) return "Semana desconhecida";
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  return `${formatShortDate(start)} → ${formatShortDate(end)}`;
+}
+
+function getGlobalStats() {
+  const records = appState.records.filter((record) => record.timestamp instanceof Date && !Number.isNaN(record.timestamp.getTime()));
+  if (!records.length) return null;
+
+  const dayCounts = new Map();
+  const dayParticipants = new Map();
+  const weekCounts = new Map();
+  const weekParticipants = new Map();
+  const hourTotals = Array.from({ length: 24 }, () => 0);
+  const heatmap = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => 0));
+  const timeOfDayTotals = GLOBAL_TIME_RANGES.map((range) => ({ ...range, count: 0 }));
+  const participantKeys = new Set();
+
+  records.forEach((record) => {
+    const dayKey = record.dayKey && record.dayKey !== "unknown" ? record.dayKey : dailyBucketKey(record.timestamp);
+    if (dayKey === "unknown") return;
+    const dayDate = dateFromDayKey(dayKey);
+    const weekdayIndex = dayDate ? (dayDate.getDay() + 6) % 7 : -1;
+    const hour = record.timestamp.getHours();
+    const participantKey = record.senderKey || record.displayName;
+    const weekKey = weekStartKey(dayKey);
+
+    dayCounts.set(dayKey, (dayCounts.get(dayKey) || 0) + 1);
+    if (!dayParticipants.has(dayKey)) dayParticipants.set(dayKey, new Set());
+    dayParticipants.get(dayKey).add(participantKey);
+    participantKeys.add(participantKey);
+    hourTotals[hour] += 1;
+    if (weekdayIndex >= 0) heatmap[weekdayIndex][hour] += 1;
+    const timeRange = timeOfDayTotals.find((range) => hour >= range.start && hour < range.end);
+    if (timeRange) timeRange.count += 1;
+    weekCounts.set(weekKey, (weekCounts.get(weekKey) || 0) + 1);
+    if (!weekParticipants.has(weekKey)) weekParticipants.set(weekKey, new Set());
+    weekParticipants.get(weekKey).add(participantKey);
+  });
+
+  const activeDayKeys = [...dayCounts.keys()].sort();
+  if (!activeDayKeys.length) return null;
+  const firstDayKey = activeDayKeys[0];
+  const latestDayKey = activeDayKeys.at(-1);
+  const firstDate = dateFromDayKey(firstDayKey);
+  const latestDate = dateFromDayKey(latestDayKey);
+  const daySeries = [];
+  const cursor = new Date(firstDate);
+  while (cursor <= latestDate) {
+    const dayKey = dateKeyFromDate(cursor);
+    daySeries.push({ dayKey, count: dayCounts.get(dayKey) || 0, participants: dayParticipants.get(dayKey)?.size || 0 });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  const firstWeekKey = weekStartKey(firstDayKey);
+  const latestWeekKey = weekStartKey(latestDayKey);
+  const weeklySeries = [];
+  const weekCursor = dateFromDayKey(firstWeekKey);
+  const latestWeekDate = dateFromDayKey(latestWeekKey);
+  while (weekCursor <= latestWeekDate) {
+    const weekKey = dateKeyFromDate(weekCursor);
+    weeklySeries.push({
+      weekKey,
+      count: weekCounts.get(weekKey) || 0,
+      participants: weekParticipants.get(weekKey)?.size || 0,
+    });
+    weekCursor.setDate(weekCursor.getDate() + 7);
+  }
+
+  const completedPeriods = daySeries.filter((row) => row.dayKey < latestDayKey);
+  const projectionPeriods = (completedPeriods.length ? completedPeriods : daySeries).slice(-7);
+  const projectionTotal = projectionPeriods.reduce((sum, row) => sum + row.count, 0);
+  const projectionRate = projectionPeriods.length ? projectionTotal / projectionPeriods.length : 0;
+  const latestTimestamp = records.reduce((latest, record) => !latest || record.timestamp > latest ? record.timestamp : latest, null);
+  const total = records.length;
+  const remaining = Math.max(0, TARGET_BEERS - total);
+  const daysToTarget = remaining && projectionRate ? remaining / projectionRate : 0;
+  const projectedDate = remaining && daysToTarget && latestTimestamp
+    ? new Date(latestTimestamp.getTime() + daysToTarget * 24 * 60 * 60 * 1000)
+    : null;
+  const recentKeys = new Set(projectionPeriods.map((row) => row.dayKey));
+  const recentCounts = new Map();
+  records.forEach((record) => {
+    const dayKey = record.dayKey && record.dayKey !== "unknown" ? record.dayKey : dailyBucketKey(record.timestamp);
+    if (!recentKeys.has(dayKey)) return;
+    recentCounts.set(record.senderKey || record.displayName, (recentCounts.get(record.senderKey || record.displayName) || 0) + 1);
+  });
+  const participantsByKey = new Map(appState.participants.map((participant) => [participant.senderKey, participant]));
+  const recentLeaderboard = [...recentCounts.entries()]
+    .map(([senderKey, count]) => ({ participant: participantsByKey.get(senderKey), count }))
+    .filter((row) => row.participant)
+    .sort((first, second) => second.count - first.count || publicParticipantName(first.participant).localeCompare(publicParticipantName(second.participant)))
+    .slice(0, 5);
+
+  const orderedRecords = [...records].sort((first, second) => first.timestamp - second.timestamp);
+  let burstStart = 0;
+  let maxBurst = { count: 0, start: orderedRecords[0].timestamp, end: orderedRecords[0].timestamp };
+  orderedRecords.forEach((record, index) => {
+    while (record.timestamp.getTime() - orderedRecords[burstStart].timestamp.getTime() > 60 * 60 * 1000) burstStart += 1;
+    const count = index - burstStart + 1;
+    if (count > maxBurst.count) maxBurst = { count, start: orderedRecords[burstStart].timestamp, end: record.timestamp };
+  });
+
+  const sessions = [];
+  let session = [];
+  orderedRecords.forEach((record) => {
+    const previous = session.at(-1);
+    const samePeriod = previous && previous.dayKey === record.dayKey;
+    const closeEnough = previous && record.timestamp.getTime() - previous.timestamp.getTime() <= 90 * 60 * 1000;
+    if (session.length && (!samePeriod || !closeEnough)) {
+      sessions.push(session);
+      session = [];
+    }
+    session.push(record);
+  });
+  if (session.length) sessions.push(session);
+  const largestSessionRecords = sessions.sort((first, second) => second.length - first.length)[0] || [];
+  const largestSession = largestSessionRecords.length
+    ? { count: largestSessionRecords.length, start: largestSessionRecords[0].timestamp, end: largestSessionRecords.at(-1).timestamp }
+    : null;
+
+  const weekdayTotals = heatmap.map((hours) => hours.reduce((sum, count) => sum + count, 0));
+  const peakHourCount = Math.max(...hourTotals);
+  const peakHour = hourTotals.indexOf(peakHourCount);
+  const peakWeekdayCount = Math.max(...weekdayTotals);
+  const peakWeekday = weekdayTotals.indexOf(peakWeekdayCount);
+  const peakDay = [...daySeries].sort((first, second) => second.count - first.count || second.dayKey.localeCompare(first.dayKey))[0];
+  const peakWeek = [...weeklySeries].sort((first, second) => second.count - first.count || second.weekKey.localeCompare(first.weekKey))[0];
+  const recentWeekRows = weeklySeries.slice(-4);
+  const recentWeekAverage = recentWeekRows.reduce((sum, row) => sum + row.count, 0) / Math.max(recentWeekRows.length, 1);
+  const activeDayCount = daySeries.filter((row) => row.count > 0).length;
+  const totalActiveParticipants = daySeries.reduce((sum, row) => sum + row.participants, 0);
+  const weekendTotal = weekdayTotals[5] + weekdayTotals[6];
+
+  let longestActiveRun = 0;
+  let activeRun = 0;
+  let previousDayKey = null;
+  daySeries.forEach((row) => {
+    activeRun = row.count > 0 && previousDayKey && shiftDayKey(previousDayKey, 1) === row.dayKey ? activeRun + 1 : row.count > 0 ? 1 : 0;
+    longestActiveRun = Math.max(longestActiveRun, activeRun);
+    previousDayKey = row.dayKey;
+  });
+
+  return {
+    total,
+    records,
+    firstDayKey,
+    latestDayKey,
+    latestTimestamp,
+    daySeries,
+    weeklySeries,
+    heatmap,
+    hourTotals,
+    weekdayTotals,
+    timeOfDayTotals,
+    activeDayCount,
+    spanDays: daySeries.length,
+    uniqueParticipants: participantKeys.size,
+    averageDaily: total / Math.max(daySeries.length, 1),
+    averageActiveParticipants: totalActiveParticipants / Math.max(daySeries.length, 1),
+    weekendTotal,
+    projectionPeriods,
+    projectionRate,
+    remaining,
+    daysToTarget,
+    projectedDate,
+    recentLeaderboard,
+    peakHour,
+    peakHourCount,
+    peakWeekday,
+    peakWeekdayCount,
+    peakDay,
+    peakWeek,
+    recentWeekAverage,
+    maxBurst,
+    largestSession,
+    longestActiveRun,
+    allTimeLeaderboard: appState.participants.slice(0, 5).map((participant) => ({ participant, count: participant.count })),
+    dataQuality: {
+      omittedMediaCount: appState.stats.omittedMediaCount || 0,
+      duplicateCount: appState.stats.duplicateCount || 0,
+      pendingDuplicateCount: appState.stats.pendingDuplicateCount || 0,
+    },
+  };
 }
 
 function getParticipantDayTotalsMap(participant) {
@@ -1227,6 +1442,109 @@ function renderDailyTotalsChart(rows) {
   const dots = rows.map((row, index) => `<circle class="history-point" cx="${x(index).toFixed(2)}" cy="${y(row.count).toFixed(2)}" r="${rows.length > 70 ? 2.2 : 3.5}"><title>${escapeHtml(formatBucketLabel(row.dayKey))}: ${escapeHtml(formatNumber(row.count))} finos</title></circle>`).join("");
 
   return `<div class="history-chart"><svg viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="history-chart-title history-chart-description"><title id="history-chart-title">Total diário de finos</title><desc id="history-chart-description">Evolução do total de finos por período de 08:00 a 08:00.</desc>${grid}<path class="history-area" d="${areaPath}"></path><polyline class="history-line" points="${points.join(" ")}"></polyline>${dots}${labels}</svg></div>`;
+}
+
+function statHeatLevel(value, maximum, levels = 5) {
+  if (!value || !maximum) return 0;
+  return Math.min(levels, Math.max(1, Math.ceil((value / maximum) * levels)));
+}
+
+function renderGlobalHeatmap(stats) {
+  const maximum = Math.max(...stats.heatmap.flat(), 1);
+  const hours = Array.from({ length: 24 }, (_, hour) => `<span>${hour % 4 === 0 ? pad(hour) : ""}</span>`).join("");
+  const rows = stats.heatmap.map((hourCounts, weekdayIndex) => `
+    <div class="global-heatmap-row">
+      <span class="global-heatmap-day">${GLOBAL_WEEKDAY_LABELS[weekdayIndex]}</span>
+      <div class="global-heatmap-cells">
+        ${hourCounts.map((count, hour) => `<span class="global-heat-cell heat-level-${statHeatLevel(count, maximum)}" title="${escapeHtml(`${GLOBAL_WEEKDAY_LABELS[weekdayIndex]} · ${pad(hour)}:00 · ${formatNumber(count)} finos`)}" aria-label="${escapeHtml(`${GLOBAL_WEEKDAY_LABELS[weekdayIndex]} às ${pad(hour)}:00: ${formatNumber(count)} finos`)}"></span>`).join("")}
+      </div>
+    </div>`).join("");
+  return `<div class="global-heatmap"><div class="global-heatmap-hours"><span></span><div>${hours}</div></div>${rows}<div class="global-heatmap-legend"><span>menos</span><i class="heat-level-1"></i><i class="heat-level-2"></i><i class="heat-level-3"></i><i class="heat-level-4"></i><i class="heat-level-5"></i><span>mais</span></div></div>`;
+}
+
+function renderGlobalHourChart(stats) {
+  const maximum = Math.max(...stats.hourTotals, 1);
+  return `<div class="stats-hour-bars">${stats.hourTotals.map((count, hour) => `<div class="stats-hour-column" title="${escapeHtml(`${pad(hour)}:00 · ${formatNumber(count)} finos`)}"><span class="stats-hour-count">${formatNumber(count)}</span><div class="stats-hour-track"><span style="height:${Math.max(count ? 5 : 0, (count / maximum) * 100)}%"></span></div><small>${pad(hour)}</small></div>`).join("")}</div>`;
+}
+
+function renderGlobalTimeOfDay(stats) {
+  const total = stats.timeOfDayTotals.reduce((sum, range) => sum + range.count, 0) || 1;
+  const colors = ["amber", "rust", "night", "lime"];
+  const rows = stats.timeOfDayTotals.map((range, index) => `<div class="stats-period-row"><div class="stats-period-label"><span class="stats-period-dot stats-period-${colors[index]}"></span><span>${range.label}</span><strong>${formatNumber(range.count)}</strong></div><div class="stats-period-track"><span class="stats-period-${colors[index]}" style="width:${(range.count / total) * 100}%"></span></div><small>${formatPercent((range.count / total) * 100)}%</small></div>`).join("");
+  return `<div class="stats-period-list">${rows}</div>`;
+}
+
+function renderGlobalWeeklyChart(stats) {
+  const maximum = Math.max(...stats.weeklySeries.map((row) => row.count), 1);
+  return `<div class="stats-weekly-list">${stats.weeklySeries.map((row) => `<div class="stats-week-row"><div class="stats-week-label"><span>${escapeHtml(formatWeekLabel(row.weekKey))}</span><strong>${formatNumber(row.count)}</strong></div><div class="stats-week-track"><span style="width:${Math.max(row.count ? 4 : 0, (row.count / maximum) * 100)}%"></span></div><small>${formatNumber(row.participants)} ativos</small></div>`).join("")}</div>`;
+}
+
+function renderGlobalCalendar(stats) {
+  const maximum = Math.max(...stats.daySeries.map((row) => row.count), 1);
+  const firstDate = dateFromDayKey(stats.firstDayKey);
+  const leadingCells = firstDate ? (firstDate.getDay() + 6) % 7 : 0;
+  const blanks = Array.from({ length: leadingCells }, () => `<span class="stats-calendar-blank"></span>`).join("");
+  const cells = stats.daySeries.map((row) => {
+    const date = dateFromDayKey(row.dayKey);
+    const weekday = date ? GLOBAL_WEEKDAY_LABELS[(date.getDay() + 6) % 7] : "";
+    return `<span class="stats-calendar-cell heat-level-${statHeatLevel(row.count, maximum)}" title="${escapeHtml(`${formatBucketLabel(row.dayKey)} · ${formatNumber(row.count)} finos`)}" aria-label="${escapeHtml(`${weekday}, ${formatShortDate(date)}: ${formatNumber(row.count)} finos`)}"><b>${date ? date.getDate() : ""}</b><small>${row.count ? formatNumber(row.count) : "·"}</small></span>`;
+  }).join("");
+  return `<div class="stats-calendar-weekdays">${GLOBAL_WEEKDAY_LABELS.map((label) => `<span>${label}</span>`).join("")}</div><div class="stats-calendar-grid">${blanks}${cells}</div>`;
+}
+
+function renderGlobalLeaderboard(rows) {
+  if (!rows.length) return `<p class="stats-empty-note">Ainda não há participantes suficientes para comparar.</p>`;
+  return `<div class="stats-leaderboard">${rows.map(({ participant, count }, index) => `<div class="stats-leader-row"><span class="stats-leader-rank">${String(index + 1).padStart(2, "0")}</span><span class="stats-leader-name">${escapeHtml(publicParticipantName(participant))}</span><strong>${formatNumber(count)}</strong></div>`).join("")}</div>`;
+}
+
+function renderStats() {
+  if (!dom.statsMount) return;
+  if (!appState.records.length) {
+    dom.statsMount.innerHTML = emptyStateHtml("Ainda não há padrões para ler.", "Importe uma exportação do WhatsApp para transformar o arquivo num mapa de ritmo, picos e projeções.");
+    return;
+  }
+
+  const stats = getGlobalStats();
+  if (!stats) {
+    dom.statsMount.innerHTML = emptyStateHtml("O arquivo está sem datas válidas.", "Não há registros datados suficientes para desenhar estatísticas globais.");
+    return;
+  }
+  const progress = Math.min(100, (stats.total / TARGET_BEERS) * 100);
+  const projectionDate = stats.remaining ? (stats.projectedDate ? formatDate(stats.projectedDate) : "sem projeção") : "milhão alcançado";
+  const projectionBasis = `${formatNumber(stats.projectionRate)} finos / período · média dos últimos ${formatNumber(stats.projectionPeriods.length)} períodos`;
+  const peakDayLabel = stats.peakDay ? formatBucketLabel(stats.peakDay.dayKey, true) : "—";
+  const peakWeekLabel = stats.peakWeek ? formatWeekLabel(stats.peakWeek.weekKey) : "—";
+  const maxBurstLabel = stats.maxBurst ? `${formatTime(stats.maxBurst.start)}–${formatTime(stats.maxBurst.end)}` : "—";
+  const largestSessionLabel = stats.largestSession ? `${formatTime(stats.largestSession.start)}–${formatTime(stats.largestSession.end)}` : "—";
+  const dataQuality = stats.dataQuality;
+
+  dom.statsMount.innerHTML = `
+    <div class="stats-meta-line"><span class="dataset-badge"><span class="status-pulse"></span><strong>${escapeHtml(formatBucketLabel(stats.latestDayKey, true))}</strong> · ${formatNumber(stats.spanDays)} dias no arquivo</span><span class="stats-meta-note">Atualizado até ${escapeHtml(formatDateTime(stats.latestTimestamp))}</span></div>
+    <section class="stats-projection-card">
+      <div class="stats-projection-copy"><p class="eyebrow">Projeção até ao milhão</p><h2>${stats.remaining ? "O próximo marco tem data." : "O marco já foi alcançado."}</h2><div class="stats-projection-date">${escapeHtml(projectionDate)}</div><p>${stats.remaining ? `Ao ritmo recente, faltam cerca de ${formatNumber(Math.ceil(stats.daysToTarget))} dias.` : "O arquivo já passou a meta de 1 000 000 de finos."} <strong>${escapeHtml(projectionBasis)}</strong></p></div>
+      <div class="stats-projection-side"><div class="stats-projection-label"><span>Progresso atual</span><strong>${formatPercent(progress)}%</strong></div><div class="stats-projection-track"><span style="width:${Math.max(progress, stats.total ? 0.8 : 0)}%"></span></div><div class="stats-projection-numbers"><span>${formatNumber(stats.total)} contados</span><span>${formatNumber(stats.remaining)} em falta</span></div></div>
+    </section>
+    <div class="stats-kpi-grid">
+      <article class="stats-kpi-card"><span>Média por dia</span><strong>${formatNumber(stats.averageDaily)}</strong><small>inclui dias sem atividade</small></article>
+      <article class="stats-kpi-card stats-kpi-card-lime"><span>Dias ativos</span><strong>${formatNumber(stats.activeDayCount)}</strong><small>de ${formatNumber(stats.spanDays)} no calendário</small></article>
+      <article class="stats-kpi-card stats-kpi-card-rust"><span>Participantes únicos</span><strong>${formatNumber(stats.uniqueParticipants)}</strong><small>remetentes com fino contado</small></article>
+      <article class="stats-kpi-card"><span>Melhor período</span><strong>${formatNumber(stats.peakDay?.count || 0)}</strong><small>${escapeHtml(peakDayLabel)}</small></article>
+      <article class="stats-kpi-card stats-kpi-card-dark"><span>Maior semana</span><strong>${formatNumber(stats.peakWeek?.count || 0)}</strong><small>${escapeHtml(peakWeekLabel)}</small></article>
+      <article class="stats-kpi-card stats-kpi-card-lime"><span>Streak do arquivo</span><strong>${formatNumber(stats.longestActiveRun)}</strong><small>dias ativos consecutivos</small></article>
+    </div>
+    <div class="stats-grid stats-grid-wide-first">
+      <section class="panel-card stats-panel stats-heatmap-panel"><div class="section-card-header"><div><p class="eyebrow">Quando acontece</p><h2>O mapa do ritmo</h2></div><span class="table-eyebrow">dia do período × hora</span></div><div class="stats-panel-body">${renderGlobalHeatmap(stats)}<p class="stats-method-note">As horas seguem a hora real do envio; o dia da semana segue o período das 08:00 às 08:00.</p></div></section>
+      <section class="panel-card stats-panel"><div class="section-card-header"><div><p class="eyebrow">Distribuição horária</p><h2>Quando se bebe?</h2></div><span class="table-eyebrow">24 horas</span></div><div class="stats-panel-body stats-time-body">${renderGlobalHourChart(stats)}${renderGlobalTimeOfDay(stats)}<div class="stats-weekday-summary"><div><span>Dia mais forte</span><strong>${GLOBAL_WEEKDAY_LABELS[stats.peakWeekday]}</strong><small>${formatNumber(stats.peakWeekdayCount)} finos</small></div><div><span>Fim de semana</span><strong>${formatNumber(stats.weekendTotal)}</strong><small>${formatPercent((stats.weekendTotal / Math.max(stats.total, 1)) * 100)}% do arquivo</small></div></div></div></section>
+    </div>
+    <div class="stats-grid">
+      <section class="panel-card stats-panel"><div class="section-card-header"><div><p class="eyebrow">Tendência</p><h2>Finos por semana</h2></div><span class="table-eyebrow">média recente · ${formatNumber(stats.recentWeekAverage)}</span></div><div class="stats-panel-body">${renderGlobalWeeklyChart(stats)}<p class="stats-method-note">Cada barra soma os períodos das 08:00 dessa semana. A semana atual pode estar incompleta.</p></div></section>
+      <section class="panel-card stats-panel"><div class="section-card-header"><div><p class="eyebrow">Calendário</p><h2>O arquivo em dias</h2></div><span class="table-eyebrow">${formatNumber(stats.activeDayCount)} dias ativos</span></div><div class="stats-panel-body">${renderGlobalCalendar(stats)}<p class="stats-method-note">Mais escuro significa mais finos no período. Células vazias são dias sem registo.</p></div></section>
+    </div>
+    <div class="stats-grid">
+      <section class="panel-card stats-panel"><div class="section-card-header"><div><p class="eyebrow">Quem aparece</p><h2>Todo o tempo · último ritmo</h2></div><span class="table-eyebrow">top 5</span></div><div class="stats-leaderboards"><div><p class="stats-subheading">Acumulado</p>${renderGlobalLeaderboard(stats.allTimeLeaderboard)}</div><div><p class="stats-subheading">Últimos períodos</p>${renderGlobalLeaderboard(stats.recentLeaderboard)}</div></div><div class="stats-panel-foot">${formatNumber(stats.averageActiveParticipants)} participantes ativos por dia, em média.</div></section>
+      <section class="panel-card stats-panel"><div class="section-card-header"><div><p class="eyebrow">Recordes globais</p><h2>Picos que ficam</h2></div><span class="table-eyebrow">arquivo completo</span></div><div class="stats-record-list"><div><span>Hora mais forte</span><strong>${pad(stats.peakHour)}:00 · ${formatNumber(stats.peakHourCount)}</strong></div><div><span>Maior rajada · 60 min</span><strong>${formatNumber(stats.maxBurst.count)} finos</strong><small>${escapeHtml(maxBurstLabel)}</small></div><div><span>Maior sessão</span><strong>${formatNumber(stats.largestSession?.count || 0)} finos</strong><small>${escapeHtml(largestSessionLabel)} · intervalos até 90 min</small></div><div><span>Ritmo médio recente</span><strong>${formatNumber(stats.projectionRate)} / dia</strong><small>base usada na projeção</small></div></div></section>
+    </div>
+    <section class="stats-data-card"><div><p class="eyebrow">Nota de auditoria</p><h2>O que ainda falta no arquivo</h2><p>${formatNumber(dataQuality.omittedMediaCount)} media omitido${dataQuality.omittedMediaCount === 1 ? "" : "s"} não entra${dataQuality.omittedMediaCount === 1 ? "" : "m"} no total. Há ainda ${formatNumber(dataQuality.pendingDuplicateCount)} candidato${dataQuality.pendingDuplicateCount === 1 ? "" : "s"} a duplicado pendente${dataQuality.pendingDuplicateCount === 1 ? "" : "s"}; os números acima contam apenas o registo auditado por defeito.</p></div><div class="stats-data-count"><strong>${formatNumber(dataQuality.duplicateCount)}</strong><span>candidatos duplicados encontrados</span></div></section>`;
 }
 
 function emptyStateHtml(title, body, action = "pick-chat") {
@@ -1691,6 +2009,7 @@ function renderAll() {
   renderViewState();
   renderTopbarAndSidebar();
   renderOverview();
+  renderStats();
   renderDaily();
   renderParticipants();
   if (appState.currentView === "audit") renderReview();
@@ -1699,7 +2018,7 @@ function renderAll() {
 }
 
 function navigate(view) {
-  const allowed = PRIVATE_ADMIN ? ["overview", "daily", "participants", "audit", "imports", "detail"] : ["overview", "daily", "participants", "detail"];
+  const allowed = PRIVATE_ADMIN ? ["overview", "stats", "daily", "participants", "audit", "imports", "detail"] : ["overview", "stats", "daily", "participants", "detail"];
   if (!allowed.includes(view)) view = PRIVATE_ADMIN ? "audit" : "overview";
   appState.currentView = view;
   if (view !== "detail") appState.selectedParticipant = view === "participants" ? appState.selectedParticipant : appState.selectedParticipant;
@@ -1896,6 +2215,7 @@ async function importChatFile(file) {
       rawPhotoCount: parsed.rawPhotoCount,
       rawImageCount: parsed.rawImageCount,
       rawVideoCount: parsed.rawVideoCount,
+      omittedMediaCount: parsed.omittedMediaCount,
       dedupedCount: parsed.dedupedCount,
       duplicateCount: parsed.duplicateCount,
     };
@@ -1961,6 +2281,7 @@ async function loadRepositorySources() {
       rawPhotoCount: parsed.rawPhotoCount,
       rawImageCount: parsed.rawImageCount,
       rawVideoCount: parsed.rawVideoCount,
+      omittedMediaCount: parsed.omittedMediaCount,
       dedupedCount: parsed.dedupedCount,
       duplicateCount: parsed.duplicateCount,
     };
