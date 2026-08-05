@@ -52,6 +52,8 @@ const PUBLIC_PHONE_NICKNAMES = Object.freeze({
   "914324122": "Anonymous",
   "351967687218": "Cinco Dois",
   "967687218": "Cinco Dois",
+  "351919288999": "Soares",
+  "919288999": "Soares",
 });
 const PHONE_COUNTRY_CODES = Object.freeze([
   "971", "420", "355", "353", "352", "351", "244", "258", "55", "54", "44", "43", "41", "39", "34", "1",
