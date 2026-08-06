@@ -58,6 +58,10 @@ const PUBLIC_PHONE_NICKNAMES = Object.freeze({
   "912193758": "Benito Mussolfino",
   "351934390747": "Sombra",
   "934390747": "Sombra",
+  "351910189568": "Zé dos Cães",
+  "910189568": "Zé dos Cães",
+  "351916225165": "Tropa",
+  "916225165": "Tropa",
 });
 const PHONE_COUNTRY_CODES = Object.freeze([
   "971", "420", "355", "353", "352", "351", "244", "258", "55", "54", "44", "43", "41", "39", "34", "1",
