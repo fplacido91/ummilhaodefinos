@@ -54,6 +54,10 @@ const PUBLIC_PHONE_NICKNAMES = Object.freeze({
   "967687218": "Cinco Dois",
   "351919288999": "Soares",
   "919288999": "Soares",
+  "351912193758": "Benito Mussolfino",
+  "912193758": "Benito Mussolfino",
+  "351934390747": "Sombra",
+  "934390747": "Sombra",
 });
 const PHONE_COUNTRY_CODES = Object.freeze([
   "971", "420", "355", "353", "352", "351", "244", "258", "55", "54", "44", "43", "41", "39", "34", "1",
@@ -1077,8 +1081,10 @@ function getDailyTotalRows() {
 }
 
 function getLatestDayKey() {
+  const latestRecordDayKey = getDailyTotalRows().at(-1)?.dayKey || null;
+  if (latestRecordDayKey) return latestRecordDayKey;
   const latestTimestamp = getLatestDataTimestamp();
-  return latestTimestamp ? dailyBucketKey(latestTimestamp) : getDailyTotalRows().at(-1)?.dayKey || null;
+  return latestTimestamp ? dailyBucketKey(latestTimestamp) : null;
 }
 
 const GLOBAL_WEEKDAY_LABELS = Object.freeze(["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]);
