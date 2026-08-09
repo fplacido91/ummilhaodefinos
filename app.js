@@ -1647,7 +1647,8 @@ function renderOverview() {
   const sourceLabel = appState.mode === "demo" ? "Demonstração" : "Arquivo do grupo";
   const sourceDetail = appState.mode === "demo" ? "dados de exemplo" : "classificação pública atualizada";
   const publicMeta = `${formatNumber(appState.participants.length)} participantes · ${formatNumber(dayKeys.length)} períodos diários`;
-  const refreshedLabel = appState.importMeta.importedAt ? formatDateTime(appState.importMeta.importedAt) : "—";
+  const latestDataTimestamp = appState.mode === "imported" ? getLatestDataTimestamp() : null;
+  const refreshedLabel = latestDataTimestamp ? formatDateTime(latestDataTimestamp) : "—";
 
   dom.overviewMount.innerHTML = `
     <div class="overview-meta-line">
