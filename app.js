@@ -2284,7 +2284,9 @@ async function loadRepositorySources() {
       const reviewPayload = await reviewResponse.json();
       const repositoryDecisions = reviewPayload?.decisions || reviewPayload;
       if (repositoryDecisions && typeof repositoryDecisions === "object") {
-        appState.reviewDecisions = { ...repositoryDecisions, ...appState.reviewDecisions };
+        appState.reviewDecisions = PRIVATE_ADMIN
+          ? { ...repositoryDecisions, ...appState.reviewDecisions }
+          : repositoryDecisions;
       }
     }
     migrateFilenameDuplicateDecisions();
