@@ -111,6 +111,7 @@ const dom = {
   overviewMount: document.getElementById("overviewMount"),
   statsMount: document.getElementById("statsMount"),
   dailyMount: document.getElementById("dailyMount"),
+  weeklyMount: document.getElementById("weeklyMount"),
   participantsMount: document.getElementById("participantsMount"),
   reviewMount: document.getElementById("reviewMount"),
   importsStatus: document.getElementById("importsStatus"),
@@ -150,6 +151,7 @@ const appState = {
   manualMappings: loadMappings(),
   reviewDecisions: loadReviewDecisions(),
   selectedDay: null,
+  selectedWeek: null,
   reviewPage: 1,
   reviewFilter: PRIVATE_ADMIN ? "duplicates" : "pending",
   reviewSearch: "",
@@ -1040,6 +1042,11 @@ function refreshDerived() {
   if (!appState.selectedDay || !dayKeys.includes(appState.selectedDay)) {
     appState.selectedDay = dayKeys[dayKeys.length - 1] || null;
   }
+  const weekKeys = getWeeklyPeriodKeys();
+  const defaultWeekKey = weekKeys.length > 1 ? weekKeys.at(-2) : weekKeys.at(-1) || null;
+  if (!appState.selectedWeek || !weekKeys.includes(appState.selectedWeek)) {
+    appState.selectedWeek = defaultWeekKey;
+  }
   if (appState.selectedParticipant && !appState.participants.some((person) => person.id === appState.selectedParticipant)) {
     appState.selectedParticipant = null;
   }
@@ -1107,6 +1114,16 @@ function getDailyWinnerRankings(limit = 10) {
 function getLatestWeekKey() {
   const latestDayKey = getLatestDayKey();
   return latestDayKey ? weekStartKey(latestDayKey) : null;
+}
+
+function getWeeklyPeriodKeys() {
+  const weekKeys = new Set();
+  appState.records.forEach((record) => {
+    const dayKey = record.dayKey && record.dayKey !== "unknown" ? record.dayKey : dailyBucketKey(record.timestamp);
+    const weekKey = weekStartKey(dayKey);
+    if (weekKey !== "unknown") weekKeys.add(weekKey);
+  });
+  return [...weekKeys].sort();
 }
 
 function getParticipantWeekTotalsMap(participant) {
@@ -1729,7 +1746,7 @@ function renderOverview() {
             ? streakValue(currentStreak)
             : `+${formatNumber(row.allTimeStreak)}`;
       const detail = kind === "daily-wins"
-        ? `${formatNumber(row.winningFinos)} finos · último ${formatDate(dateFromDayKey(row.lastWinDayKey))}`
+        ? `Média de finos das vitórias: ${formatNumber(row.winningFinos / row.wins)}`
         : kind === "daily"
           ? formatDate(dateFromDayKey(row.dayKey))
           : kind === "weekly"
@@ -1828,6 +1845,41 @@ function renderDaily() {
     <div class="day-window-card"><div class="window-copy">${icon("calendar")}<div><strong>Um dia do grupo = 08:00 → 08:00 do dia seguinte</strong><span>${escapeHtml(formatBucketLabel(selectedDay, true))} é o período selecionado.</span></div></div><div class="day-total"><strong>${formatNumber(total)}</strong><span>finos neste período</span></div></div>
     <section class="day-chart-card"><div class="chart-heading"><h2>Líderes do período</h2><span>Os ${Math.min(rows.length, 8)} principais de ${rows.length} remetentes ativos</span></div><div class="bar-chart">${chartRows || `<p class="page-description">Não há finos neste período.</p>`}</div></section>
     <section class="table-card"><div class="section-card-header"><div><p class="eyebrow">Classificação diária</p><h2>Todos neste período</h2></div><span class="table-eyebrow">${escapeHtml(formatBucketLabel(selectedDay))}</span></div><div class="table-scroll"><table><thead><tr><th>#</th><th>Participante</th><th>Finos</th>${PRIVATE_ADMIN ? "<th>Identidade</th>" : ""}</tr></thead><tbody>${tableRows || `<tr><td colspan="${PRIVATE_ADMIN ? 4 : 3}"><div class="empty-state"><p>Não há finos neste período.</p></div></td></tr>`}</tbody></table></div><div class="table-footer"><span>${formatNumber(rows.length)} remetente ativo${rows.length === 1 ? "" : "s"}</span><span>Abra uma linha para ver o registo completo de ficheiros</span></div></section>`;
+}
+
+function renderWeekly() {
+  if (!dom.weeklyMount) return;
+  if (!appState.records.length) {
+    dom.weeklyMount.innerHTML = emptyStateHtml("Ainda não há contagens semanais.", "Importe um chat e as semanas de segunda-feira às 08:00 serão criadas automaticamente.");
+    return;
+  }
+
+  const weekKeys = getWeeklyPeriodKeys().sort().reverse();
+  if (!weekKeys.length) {
+    dom.weeklyMount.innerHTML = emptyStateHtml("O arquivo não tem semanas datadas.", "Não há registos datados suficientes para desenhar uma classificação semanal.");
+    return;
+  }
+
+  const selectedWeek = weekKeys.includes(appState.selectedWeek) ? appState.selectedWeek : weekKeys[0];
+  appState.selectedWeek = selectedWeek;
+  const rows = getWeekRows(selectedWeek);
+  const total = rows.reduce((sum, row) => sum + row.count, 0);
+  const max = rows[0]?.count || 1;
+  const options = weekKeys
+    .map((weekKey) => `<option value="${weekKey}" ${weekKey === selectedWeek ? "selected" : ""}>${escapeHtml(formatWeekPeriodLabel(weekKey))}</option>`)
+    .join("");
+  const chartRows = rows.slice(0, 8)
+    .map((row) => `<div class="bar-row"><span class="bar-label">${escapeHtml(publicParticipantName(row.participant))}</span><span class="bar-track"><span style="width:${Math.max(4, (row.count / max) * 100)}%"></span></span><span class="bar-value">${formatNumber(row.count)}</span></div>`)
+    .join("");
+  const tableRows = rows
+    .map((row, index) => `<tr class="clickable-row" data-action="open-participant" data-id="${escapeHtml(row.participant.id)}"><td class="table-rank">${String(index + 1).padStart(2, "0")}</td><td><button class="table-person-button" data-action="open-participant" data-id="${escapeHtml(row.participant.id)}"><span class="person-copy"><span class="person-name">${escapeHtml(publicParticipantName(row.participant))}</span>${PRIVATE_ADMIN ? `<span class="person-subline">${escapeHtml(formatIdentitySubtitle(row.participant))}</span>` : ""}</span></button></td><td class="count-cell">${formatNumber(row.count)}</td>${PRIVATE_ADMIN ? `<td>${statusHtml(row.participant)}</td>` : ""}</tr>`)
+    .join("");
+
+  dom.weeklyMount.innerHTML = `
+    <div class="daily-toolbar"><div><h2>${escapeHtml(formatWeekPeriodLabel(selectedWeek))}</h2><p>As semanas começam à segunda-feira às 08:00 e terminam na segunda seguinte às 08:00.</p></div><div class="select-wrap"><label for="weekSelect">Escolha uma semana</label><select id="weekSelect">${options}</select>${icon("chevron-down")}</div></div>
+    <div class="day-window-card"><div class="window-copy">${icon("calendar")}<div><strong>Uma semana do grupo = segunda 08:00 → segunda 08:00</strong><span>${escapeHtml(formatWeekPeriodLabel(selectedWeek))} é o período selecionado.</span></div></div><div class="day-total"><strong>${formatNumber(total)}</strong><span>finos nesta semana</span></div></div>
+    <section class="day-chart-card"><div class="chart-heading"><h2>Líderes da semana</h2><span>Os ${Math.min(rows.length, 8)} principais de ${rows.length} remetentes ativos</span></div><div class="bar-chart">${chartRows || `<p class="page-description">Não há finos nesta semana.</p>`}</div></section>
+    <section class="table-card"><div class="section-card-header"><div><p class="eyebrow">Classificação semanal</p><h2>Todos nesta semana</h2></div><span class="table-eyebrow">${escapeHtml(formatWeekPeriodLabel(selectedWeek))}</span></div><div class="table-scroll"><table><thead><tr><th>#</th><th>Participante</th><th>Finos</th>${PRIVATE_ADMIN ? "<th>Identidade</th>" : ""}</tr></thead><tbody>${tableRows || `<tr><td colspan="${PRIVATE_ADMIN ? 4 : 3}"><div class="empty-state"><p>Não há finos nesta semana.</p></div></td></tr>`}</tbody></table></div><div class="table-footer"><span>${formatNumber(rows.length)} remetente ativo${rows.length === 1 ? "" : "s"}</span><span>Abra uma linha para ver o registo completo de ficheiros</span></div></section>`;
 }
 
 function sortParticipants(participants) {
@@ -2135,6 +2187,7 @@ function renderAll() {
   renderOverview();
   renderStats();
   renderDaily();
+  renderWeekly();
   renderParticipants();
   if (appState.currentView === "audit") renderReview();
   renderImportsStatus();
@@ -2142,7 +2195,7 @@ function renderAll() {
 }
 
 function navigate(view) {
-  const allowed = PRIVATE_ADMIN ? ["overview", "stats", "daily", "participants", "audit", "imports", "detail"] : ["overview", "stats", "daily", "participants", "detail"];
+  const allowed = PRIVATE_ADMIN ? ["overview", "stats", "daily", "weekly", "participants", "audit", "imports", "detail"] : ["overview", "stats", "daily", "weekly", "participants", "detail"];
   if (!allowed.includes(view)) view = PRIVATE_ADMIN ? "audit" : "overview";
   appState.currentView = view;
   if (view !== "detail") appState.selectedParticipant = view === "participants" ? appState.selectedParticipant : appState.selectedParticipant;
@@ -2350,6 +2403,7 @@ async function importChatFile(file) {
     appState.selectedParticipant = null;
     appState.detailPage = 1;
     appState.selectedDay = null;
+    appState.selectedWeek = null;
     refreshDerived();
     persistAppState();
     navigate("overview");
@@ -2418,6 +2472,7 @@ async function loadRepositorySources() {
     appState.selectedParticipant = null;
     appState.detailPage = 1;
     appState.selectedDay = null;
+    appState.selectedWeek = null;
 
     if (contactsResponse.ok) {
       appState.contacts = parseContactsCsv(await contactsResponse.text());
@@ -2525,6 +2580,9 @@ document.addEventListener("change", (event) => {
   } else if (event.target.id === "daySelect") {
     appState.selectedDay = event.target.value;
     renderDaily();
+  } else if (event.target.id === "weekSelect") {
+    appState.selectedWeek = event.target.value;
+    renderWeekly();
   } else if (event.target.id === "participantSort") {
     appState.participantSort = event.target.value;
     renderParticipants();

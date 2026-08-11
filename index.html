@@ -115,6 +115,10 @@
             <svg class="icon"><use href="#icon-calendar"></use></svg>
             <span>Janela diária</span>
           </button>
+          <button class="nav-item" data-action="navigate" data-view="weekly">
+            <svg class="icon"><use href="#icon-calendar"></use></svg>
+            <span>Janela semanal</span>
+          </button>
           <button class="nav-item" data-action="navigate" data-view="participants">
             <svg class="icon"><use href="#icon-users"></use></svg>
             <span>Participantes</span>
@@ -190,6 +194,18 @@
               <div class="window-note"><span class="window-note-dot"></span>08:00 → 08:00</div>
             </div>
             <div id="dailyMount"></div>
+          </section>
+
+          <section class="view" id="view-weekly" aria-labelledby="weekly-title">
+            <div class="page-intro page-intro-compact">
+              <div>
+                <p class="eyebrow">A semana começa quando o grupo começa</p>
+                <h1 id="weekly-title">Rankings <em>semanais.</em></h1>
+                <p class="page-description">Consulte a classificação de cada período entre segunda-feira às 08:00 e a segunda-feira seguinte às 08:00.</p>
+              </div>
+              <div class="window-note"><span class="window-note-dot"></span>segunda 08:00 → segunda 08:00</div>
+            </div>
+            <div id="weeklyMount"></div>
           </section>
 
           <section class="view" id="view-participants" aria-labelledby="participants-title">
