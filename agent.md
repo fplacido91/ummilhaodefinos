@@ -9,3 +9,4 @@
 5. Run relevant tests or checks after making changes when practical.
 6. Do not commit, push, or perform destructive operations unless explicitly requested.
 7. Report what changed and mention any checks that were run.
+8. **Canonical chat updates:** Never replace `WhatsApp Chat with Um Milhão de Finos.txt` with an incremental export. Preserve the existing history and use `tools/merge_chat_log.py` to append only new, non-duplicate messages.

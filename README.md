@@ -18,7 +18,13 @@ Depois abra <http://localhost:4173>. Ao iniciar, a aplicação carrega automatic
 
 As imagens são carregadas diretamente do DigitalOcean Spaces através do valor de `meta[name="media-base-url"]` em `index.html`.
 
-Para atualizar o registo de produção, substitua os ficheiros canónicos por uma nova exportação completa e recarregue a página. As ferramentas de preparação do arquivo não fazem parte da navegação pública. O chat, contactos e decisões são fontes de trabalho do administrador; não publique estes ficheiros sem confirmar que a exposição é aceitável.
+Para atualizar o registo de produção, preserve o histórico do chat e faça merge da nova exportação incremental antes de recarregar a página:
+
+```powershell
+python tools/merge_chat_log.py "WhatsApp Chat with Um Milhão de Finos.txt" nova-exportacao.txt
+```
+
+A ferramenta encontra a última mensagem partilhada, acrescenta apenas o que vem depois e ignora blocos de mensagem duplicados. As ferramentas de preparação do arquivo não fazem parte da navegação pública. O chat, contactos e decisões são fontes de trabalho do administrador; não publique estes ficheiros sem confirmar que a exposição é aceitável.
 
 ## Regras de importação
 
@@ -35,7 +41,7 @@ A implementação em `app.js` trata os casos da exportação do WhatsApp que alt
 - Uma semana decorre de segunda-feira às 08:00 até à segunda-feira seguinte às 08:00. Os vencedores semanais usam exatamente essa janela.
 - Telefones são normalizados removendo todos os caracteres que não sejam dígitos. As vistas públicas omitem o prefixo internacional; nomes públicos configurados podem substituir o telefone. Nomes do chat são associados automaticamente apenas quando correspondem exatamente a um contacto com um único número.
 - Nomes sem uma correspondência telefónica única aparecem como **Telefone em falta** nas vistas públicas, salvo quando existe um alias público configurado. As associações manuais nome → telefone ficam guardadas no armazenamento local e são reutilizadas em futuras importações.
-- Uma nova exportação substitui os registos atuais e recalcula todas as classificações; nunca é acrescentada à anterior.
+- O log canónico do repositório é cumulativo: uma nova exportação incremental deve ser fundida com `tools/merge_chat_log.py`, preservando o histórico e evitando mensagens duplicadas. Depois, a aplicação recalcula todas as classificações.
 
 ## Vistas
 
