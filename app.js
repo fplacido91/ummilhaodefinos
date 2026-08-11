@@ -40,6 +40,8 @@ const PUBLIC_PHONE_NICKNAMES = Object.freeze({
   "912643624": "Max Verstappen",
   "351938063574": "Eduardo Piggy",
   "938063574": "Eduardo Piggy",
+  "351938176279": "Max Malte",
+  "938176279": "Max Malte",
   "351916517325": "Pogacar",
   "916517325": "Pogacar",
   "351938808797": "Kim Jong Fino",
@@ -1071,6 +1073,37 @@ function getDailyWinners(dayKey = getLatestDayKey(), limit = 10) {
   return getDayRows(dayKey).slice(0, limit);
 }
 
+function getDailyWinnerRankings(limit = 10) {
+  const winnerTotals = new Map();
+  getDailyTotalRows().forEach(({ dayKey }) => {
+    const rows = getDayRows(dayKey);
+    const winningCount = rows[0]?.count || 0;
+    rows
+      .filter((row) => row.count === winningCount)
+      .forEach(({ participant, count }) => {
+        const current = winnerTotals.get(participant.id) || {
+          participant,
+          wins: 0,
+          winningFinos: 0,
+          lastWinDayKey: null,
+        };
+        current.wins += 1;
+        current.winningFinos += count;
+        current.lastWinDayKey = dayKey;
+        winnerTotals.set(participant.id, current);
+      });
+  });
+
+  return [...winnerTotals.values()]
+    .sort((first, second) => (
+      second.wins - first.wins ||
+      second.winningFinos - first.winningFinos ||
+      second.lastWinDayKey.localeCompare(first.lastWinDayKey) ||
+      publicParticipantName(first.participant).localeCompare(publicParticipantName(second.participant))
+    ))
+    .slice(0, limit);
+}
+
 function getLatestWeekKey() {
   const latestDayKey = getLatestDayKey();
   return latestDayKey ? weekStartKey(latestDayKey) : null;
@@ -1658,7 +1691,7 @@ function renderOverview() {
   const latestDayKey = getLatestDayKey();
   const latestDayRows = latestDayKey ? getDayRows(latestDayKey) : [];
   const latestDayTotal = latestDayRows.reduce((sum, row) => sum + row.count, 0);
-  const dailyWinners = getDailyWinners(latestDayKey);
+  const dailyWinnerRankings = getDailyWinnerRankings();
   const latestWeekKey = getLatestWeekKey();
   const weeklyWinners = getWeeklyWinners(latestWeekKey);
   const currentStreaks = getStreakRankings(latestDayKey).slice(0, 10);
@@ -1687,23 +1720,28 @@ function renderOverview() {
     ? rows.map((row, index) => {
       const currentStreak = row.currentStreak;
       const isWinnerRanking = kind === "daily" || kind === "weekly";
-      const value = isWinnerRanking
-        ? formatNumber(row.count)
-        : kind === "current"
-          ? streakValue(currentStreak)
-          : `+${formatNumber(row.allTimeStreak)}`;
-      const detail = kind === "daily"
-        ? formatDate(dateFromDayKey(row.dayKey))
-        : kind === "weekly"
-          ? formatWeekLabel(row.weekKey)
+      const isDailyWinnerRanking = kind === "daily-wins";
+      const value = isDailyWinnerRanking
+        ? formatNumber(row.wins)
+        : isWinnerRanking
+          ? formatNumber(row.count)
           : kind === "current"
-            ? streakLabel(currentStreak)
-            : "melhor sequência";
+            ? streakValue(currentStreak)
+            : `+${formatNumber(row.allTimeStreak)}`;
+      const detail = kind === "daily-wins"
+        ? `${formatNumber(row.winningFinos)} finos · último ${formatDate(dateFromDayKey(row.lastWinDayKey))}`
+        : kind === "daily"
+          ? formatDate(dateFromDayKey(row.dayKey))
+          : kind === "weekly"
+            ? formatWeekLabel(row.weekKey)
+            : kind === "current"
+              ? streakLabel(currentStreak)
+              : "melhor sequência";
       const valueClass = kind === "current" ? ` streak-${currentStreak.status}` : "";
-      const suffix = isWinnerRanking ? "finos" : "dias";
+      const suffix = isDailyWinnerRanking ? "vitórias" : isWinnerRanking ? "finos" : "dias";
       return `<button class="score-row" data-action="open-participant" data-id="${escapeHtml(row.participant.id)}" title="Abrir detalhe de ${escapeHtml(publicParticipantName(row.participant))}"><span class="score-rank">${String(index + 1).padStart(2, "0")}</span><span class="score-person"><strong>${escapeHtml(publicParticipantName(row.participant))}</strong><small>${escapeHtml(detail)}</small></span><span class="score-number${valueClass}"><strong>${escapeHtml(value)}</strong><small>${suffix}</small></span></button>`;
     }).join("")
-    : `<div class="ranking-empty">${kind === "current" || kind === "all-time" ? "Ainda não há sequências para comparar." : "Não há finos contados neste período."}</div>`;
+    : `<div class="ranking-empty">${kind === "current" || kind === "all-time" ? "Ainda não há sequências para comparar." : kind === "daily-wins" ? "Ainda não há períodos diários para comparar." : "Não há finos contados neste período."}</div>`;
 
   const sourceLabel = appState.mode === "demo" ? "Demonstração" : "Arquivo do grupo";
   const sourceDetail = appState.mode === "demo" ? "dados de exemplo" : "classificação pública atualizada";
@@ -1741,8 +1779,9 @@ function renderOverview() {
         <div class="ranking-list">${rankingRowsHtml(totalRanking, maxTotalCount)}</div>
       </section>
       <section class="panel-card ranking-panel">
-        <div class="section-card-header"><div><p class="eyebrow">Vencedores do último período</p><h2>Top 10 Daily winners</h2></div><span class="table-eyebrow">${escapeHtml(dailyPeriodLabel)}</span></div>
-        <div class="score-list">${scoreRowsHtml(dailyWinners, "daily")}</div>
+        <div class="section-card-header"><div><p class="eyebrow">Primeiros lugares acumulados</p><h2>Top 10 Daily winners</h2></div><span class="table-eyebrow">1.º · 08:00 → 08:00</span></div>
+        <div class="score-list">${scoreRowsHtml(dailyWinnerRankings, "daily-wins")}</div>
+        <div class="panel-note">Conta quantos períodos diários cada participante ganhou. Em caso de empate, todos os primeiros lugares contam.</div>
       </section>
       <section class="panel-card ranking-panel">
         <div class="section-card-header"><div><p class="eyebrow">Classificação semanal</p><h2>Winners of the week</h2></div><span class="table-eyebrow">segunda 08:00 → segunda 08:00</span></div>
@@ -2542,6 +2581,7 @@ window.UmMilhaoDeFinos = {
   dailyBucketKey,
   weekStartKey,
   getDailyWinners,
+  getDailyWinnerRankings,
   getWeeklyWinners,
   getWeeklyHighscores,
   exportReviewDecisions,

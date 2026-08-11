@@ -38,6 +38,7 @@ A implementação em `app.js` trata os casos da exportação do WhatsApp que alt
 - O painel mostra ficheiros de media antes da deduplicação, total contado e registos duplicados removidos. Candidatos a duplicado continuam disponíveis na auditoria visual com os dois lados do par; uma decisão manual pode restaurá-los ou confirmá-los. Registos marcados como `duplicate` ou `non-beer` ficam arquivados fora da fila de auditoria, mas as decisões são mantidas no JSON para preservar a contagem.
 - Números e legendas não alteram a atribuição nem a classificação. Só os anexos IMG/VID e as decisões da revisão contam.
 - Um dia decorre das 08:00 às 08:00 do dia seguinte. Fotografias antes das 08:00 pertencem ao período anterior.
+- Uma vitória diária corresponde ao primeiro lugar num período; em caso de empate, todos os participantes empatados recebem a vitória.
 - Uma semana decorre de segunda-feira às 08:00 até à segunda-feira seguinte às 08:00. Os vencedores semanais usam exatamente essa janela.
 - Telefones são normalizados removendo todos os caracteres que não sejam dígitos. As vistas públicas omitem o prefixo internacional; nomes públicos configurados podem substituir o telefone. Nomes do chat são associados automaticamente apenas quando correspondem exatamente a um contacto com um único número.
 - Nomes sem uma correspondência telefónica única aparecem como **Telefone em falta** nas vistas públicas, salvo quando existe um alias público configurado. As associações manuais nome → telefone ficam guardadas no armazenamento local e são reutilizadas em futuras importações.
@@ -45,7 +46,7 @@ A implementação em `app.js` trata os casos da exportação do WhatsApp que alt
 
 ## Vistas
 
-- **Visão geral** — total acumulado, progresso até 1 000 000, verificação pós-importação, top 10 total, top 10 do último período diário e vencedores da semana atual.
+- **Visão geral** — total acumulado, progresso até 1 000 000, verificação pós-importação, top 10 total, top 10 de vitórias diárias e vencedores da semana atual.
 - **Estatísticas** — mapa de calor dia do período × hora, distribuição por hora do dia, totais semanais, calendário, participação, recordes globais e projeção da data do milhão com base na média dos últimos períodos.
 - **Janela diária** — classificação selecionável por períodos das 08:00 às 08:00.
 - **Participantes** — lista pesquisável e ordenável por telefone, com o estado da identidade.
@@ -62,4 +63,4 @@ A página pública não mostra a fila de auditoria. Para rever uma nova exporta�
 
 `local-admin.html` fica ignorado pelo Git por defeito. Em produção, `meta[name="media-base-url"]` deve apontar para o bucket/CDN público do DigitalOcean Spaces; os ficheiros de media não devem ser colocados no Git.
 
-Para verificações rápidas na consola do navegador, a página expõe `window.UmMilhaoDeFinos.parseWhatsAppChat`, `parseContactsCsv`, `normalizePhone`, `dailyBucketKey`, `weekStartKey`, `getDailyWinners` e `getWeeklyWinners`.
+Para verificações rápidas na consola do navegador, a página expõe `window.UmMilhaoDeFinos.parseWhatsAppChat`, `parseContactsCsv`, `normalizePhone`, `dailyBucketKey`, `weekStartKey`, `getDailyWinners`, `getDailyWinnerRankings` e `getWeeklyWinners`.
