@@ -1066,6 +1066,43 @@ function getDayRows(dayKey) {
     .sort((first, second) => second.count - first.count || publicParticipantName(first.participant).localeCompare(publicParticipantName(second.participant)));
 }
 
+function getDailyWinners(dayKey = getLatestDayKey(), limit = 10) {
+  if (!dayKey) return [];
+  return getDayRows(dayKey).slice(0, limit);
+}
+
+function getLatestWeekKey() {
+  const latestDayKey = getLatestDayKey();
+  return latestDayKey ? weekStartKey(latestDayKey) : null;
+}
+
+function getParticipantWeekTotalsMap(participant) {
+  const totals = new Map();
+  participant.records.forEach((record) => {
+    const dayKey = record.dayKey && record.dayKey !== "unknown" ? record.dayKey : dailyBucketKey(record.timestamp);
+    const weekKey = weekStartKey(dayKey);
+    if (weekKey === "unknown") return;
+    totals.set(weekKey, (totals.get(weekKey) || 0) + 1);
+  });
+  return totals;
+}
+
+function getWeekRows(weekKey) {
+  if (!weekKey || weekKey === "unknown") return [];
+  return appState.participants
+    .map((participant) => ({
+      participant,
+      weekKey,
+      count: getParticipantWeekTotalsMap(participant).get(weekKey) || 0,
+    }))
+    .filter((row) => row.count > 0)
+    .sort((first, second) => second.count - first.count || publicParticipantName(first.participant).localeCompare(publicParticipantName(second.participant)));
+}
+
+function getWeeklyWinners(weekKey = getLatestWeekKey(), limit = 10) {
+  return getWeekRows(weekKey).slice(0, limit);
+}
+
 function shiftDayKey(dayKey, amount) {
   const date = dateFromDayKey(dayKey);
   if (!date) return null;
@@ -1119,8 +1156,16 @@ function formatWeekLabel(weekKey) {
   const start = dateFromDayKey(weekKey);
   if (!start) return "Semana desconhecida";
   const end = new Date(start);
-  end.setDate(end.getDate() + 6);
+  end.setDate(end.getDate() + 7);
   return `${formatShortDate(start)} → ${formatShortDate(end)}`;
+}
+
+function formatWeekPeriodLabel(weekKey) {
+  const start = dateFromDayKey(weekKey);
+  if (!start) return "Semana desconhecida";
+  const end = new Date(start);
+  end.setDate(end.getDate() + 7);
+  return `${formatDate(start)} 08:00 → ${formatDate(end)} 08:00`;
 }
 
 function getGlobalStats() {
@@ -1415,6 +1460,16 @@ function getDailyHighscores(limit = 10) {
     .slice(0, limit);
 }
 
+function getWeeklyHighscores(limit = 10) {
+  const rows = [];
+  appState.participants.forEach((participant) => {
+    getParticipantWeekTotalsMap(participant).forEach((count, weekKey) => rows.push({ participant, weekKey, count }));
+  });
+  return rows
+    .sort((first, second) => second.count - first.count || second.weekKey.localeCompare(first.weekKey) || publicParticipantName(first.participant).localeCompare(publicParticipantName(second.participant)))
+    .slice(0, limit);
+}
+
 function streakLabel(status) {
   if (status === "active") return "ativo";
   if (status === "risk") return "em risco";
@@ -1555,7 +1610,7 @@ function renderStats() {
       <section class="panel-card stats-panel"><div class="section-card-header"><div><p class="eyebrow">Distribuição horária</p><h2>Quando se bebe?</h2></div><span class="table-eyebrow">24 horas</span></div><div class="stats-panel-body stats-time-body">${renderGlobalHourChart(stats)}${renderGlobalTimeOfDay(stats)}<div class="stats-weekday-summary"><div><span>Dia mais forte</span><strong>${GLOBAL_WEEKDAY_LABELS[stats.peakWeekday]}</strong><small>${formatNumber(stats.peakWeekdayCount)} finos</small></div><div><span>Fim de semana</span><strong>${formatNumber(stats.weekendTotal)}</strong><small>${formatPercent((stats.weekendTotal / Math.max(stats.total, 1)) * 100)}% do arquivo</small></div></div></div></section>
     </div>
     <div class="stats-grid">
-      <section class="panel-card stats-panel"><div class="section-card-header"><div><p class="eyebrow">Tendência</p><h2>Finos por semana</h2></div><span class="table-eyebrow">média recente · ${formatNumber(stats.recentWeekAverage)}</span></div><div class="stats-panel-body">${renderGlobalWeeklyChart(stats)}<p class="stats-method-note">Cada barra soma os períodos das 08:00 dessa semana. A semana atual pode estar incompleta.</p></div></section>
+      <section class="panel-card stats-panel"><div class="section-card-header"><div><p class="eyebrow">Tendência</p><h2>Finos por semana</h2></div><span class="table-eyebrow">média recente · ${formatNumber(stats.recentWeekAverage)}</span></div><div class="stats-panel-body">${renderGlobalWeeklyChart(stats)}<p class="stats-method-note">Cada barra soma de segunda-feira 08:00 à segunda-feira seguinte 08:00. A semana atual pode estar incompleta.</p></div></section>
       <section class="panel-card stats-panel"><div class="section-card-header"><div><p class="eyebrow">Calendário</p><h2>O arquivo em dias</h2></div><span class="table-eyebrow">${formatNumber(stats.activeDayCount)} dias ativos</span></div><div class="stats-panel-body">${renderGlobalCalendar(stats)}<p class="stats-method-note">Mais escuro significa mais finos no período. Células vazias são dias sem registo.</p></div></section>
     </div>
     <div class="stats-grid">
@@ -1603,11 +1658,14 @@ function renderOverview() {
   const latestDayKey = getLatestDayKey();
   const latestDayRows = latestDayKey ? getDayRows(latestDayKey) : [];
   const latestDayTotal = latestDayRows.reduce((sum, row) => sum + row.count, 0);
-  const dailyHighscores = getDailyHighscores();
+  const dailyWinners = getDailyWinners(latestDayKey);
+  const latestWeekKey = getLatestWeekKey();
+  const weeklyWinners = getWeeklyWinners(latestWeekKey);
   const currentStreaks = getStreakRankings(latestDayKey).slice(0, 10);
   const allTimeStreaks = getAllTimeStreakRankings().slice(0, 10);
   const maxTotalCount = totalRanking[0]?.count || 1;
   const dailyPeriodLabel = latestDayKey ? formatBucketLabel(latestDayKey, true) : "sem período datado";
+  const weeklyPeriodLabel = latestWeekKey ? formatWeekPeriodLabel(latestWeekKey) : "sem semana datada";
   if (!appState.records.length) {
     dom.overviewMount.innerHTML = `${renderImportSummary()}${emptyStateHtml("O registo está com sede.", "Importe uma exportação completa do WhatsApp para transformar imagens e vídeos num fino auditável por envio.")}`;
     return;
@@ -1628,21 +1686,24 @@ function renderOverview() {
   const scoreRowsHtml = (rows, kind) => rows.length
     ? rows.map((row, index) => {
       const currentStreak = row.currentStreak;
-      const value = kind === "daily"
+      const isWinnerRanking = kind === "daily" || kind === "weekly";
+      const value = isWinnerRanking
         ? formatNumber(row.count)
         : kind === "current"
           ? streakValue(currentStreak)
           : `+${formatNumber(row.allTimeStreak)}`;
       const detail = kind === "daily"
         ? formatDate(dateFromDayKey(row.dayKey))
-        : kind === "current"
-          ? streakLabel(currentStreak)
-          : "melhor sequência";
+        : kind === "weekly"
+          ? formatWeekLabel(row.weekKey)
+          : kind === "current"
+            ? streakLabel(currentStreak)
+            : "melhor sequência";
       const valueClass = kind === "current" ? ` streak-${currentStreak.status}` : "";
-      const suffix = kind === "daily" ? "finos" : "dias";
+      const suffix = isWinnerRanking ? "finos" : "dias";
       return `<button class="score-row" data-action="open-participant" data-id="${escapeHtml(row.participant.id)}" title="Abrir detalhe de ${escapeHtml(publicParticipantName(row.participant))}"><span class="score-rank">${String(index + 1).padStart(2, "0")}</span><span class="score-person"><strong>${escapeHtml(publicParticipantName(row.participant))}</strong><small>${escapeHtml(detail)}</small></span><span class="score-number${valueClass}"><strong>${escapeHtml(value)}</strong><small>${suffix}</small></span></button>`;
     }).join("")
-    : `<div class="ranking-empty">Ainda não há sequências para comparar.</div>`;
+    : `<div class="ranking-empty">${kind === "current" || kind === "all-time" ? "Ainda não há sequências para comparar." : "Não há finos contados neste período."}</div>`;
 
   const sourceLabel = appState.mode === "demo" ? "Demonstração" : "Arquivo do grupo";
   const sourceDetail = appState.mode === "demo" ? "dados de exemplo" : "classificação pública atualizada";
@@ -1680,8 +1741,13 @@ function renderOverview() {
         <div class="ranking-list">${rankingRowsHtml(totalRanking, maxTotalCount)}</div>
       </section>
       <section class="panel-card ranking-panel">
-        <div class="section-card-header"><div><p class="eyebrow">Recordes de um período</p><h2>Daily highscores · top 10</h2></div><span class="table-eyebrow">08:00 → 08:00</span></div>
-        <div class="score-list">${scoreRowsHtml(dailyHighscores, "daily")}</div>
+        <div class="section-card-header"><div><p class="eyebrow">Vencedores do último período</p><h2>Top 10 Daily winners</h2></div><span class="table-eyebrow">${escapeHtml(dailyPeriodLabel)}</span></div>
+        <div class="score-list">${scoreRowsHtml(dailyWinners, "daily")}</div>
+      </section>
+      <section class="panel-card ranking-panel">
+        <div class="section-card-header"><div><p class="eyebrow">Classificação semanal</p><h2>Winners of the week</h2></div><span class="table-eyebrow">segunda 08:00 → segunda 08:00</span></div>
+        <div class="score-list">${scoreRowsHtml(weeklyWinners, "weekly")}</div>
+        <div class="panel-note">Período atual: ${escapeHtml(weeklyPeriodLabel)}.</div>
       </section>
       <section class="panel-card ranking-panel">
         <div class="section-card-header"><div><p class="eyebrow">A sequência mais recente</p><h2>Streak atual · top 10</h2></div><span class="table-eyebrow">${escapeHtml(dailyPeriodLabel)}</span></div>
@@ -2474,6 +2540,10 @@ window.UmMilhaoDeFinos = {
   parseContactsCsv,
   normalizePhone,
   dailyBucketKey,
+  weekStartKey,
+  getDailyWinners,
+  getWeeklyWinners,
+  getWeeklyHighscores,
   exportReviewDecisions,
   get state() {
     return appState;
