@@ -36,8 +36,8 @@ const PUBLIC_PHONE_NICKNAMES = Object.freeze({
   "4406820268": "The American",
   "351912487086": "Andreblcosta",
   "912487086": "Andreblcosta",
-  "351912643624": "Max Verstappen",
-  "912643624": "Max Verstappen",
+  "351912643624": "Nikita Mazepin",
+  "912643624": "Nikita Mazepin",
   "351938063574": "Eduardo Piggy",
   "938063574": "Eduardo Piggy",
   "351938176279": "Max Malte",
@@ -80,6 +80,10 @@ const PUBLIC_PHONE_NICKNAMES = Object.freeze({
   "916257209": "Duque de Paus",
   "351962039522": "Provador de Cerveja",
   "962039522": "Provador de Cerveja",
+  "351939960405": "D. Zeferino",
+  "939960405": "D. Zeferino",
+  "351911824704": "Mike Lime",
+  "911824704": "Mike Lime",
 });
 const PHONE_COUNTRY_CODES = Object.freeze([
   "971", "420", "355", "353", "352", "351", "244", "258", "55", "54", "44", "43", "41", "39", "34", "1",
