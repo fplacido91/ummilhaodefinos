@@ -26,6 +26,11 @@ const KNOWN_NAME_PHONE_MAPPINGS = Object.freeze({
   "dominguinhos": "351938574212",
   "ricardo almeida": "351916225165",
 });
+// This participant appears as a phone sender early in the export and as a
+// named sender later. Canonicalize both forms before counting or deduplicating.
+const MERGED_NAME_PHONE_MAPPINGS = Object.freeze({
+  "joao mendonca volkanov": "351910466263",
+});
 const PUBLIC_NAME_ALIASES = Object.freeze({
   "joao mendonca volkanov": "VOLKANOV",
 });
@@ -86,6 +91,8 @@ const PUBLIC_PHONE_NICKNAMES = Object.freeze({
   "911824704": "Mike Lime",
   "351966734115": "Bastos",
   "966734115": "Bastos",
+  "351910466263": "VOLKANOV",
+  "910466263": "VOLKANOV",
 });
 const PHONE_COUNTRY_CODES = Object.freeze([
   "971", "420", "355", "353", "352", "351", "244", "258", "55", "54", "44", "43", "41", "39", "34", "1",
@@ -242,6 +249,18 @@ function identifySender(rawSender) {
     senderType: "name",
     phone: "",
     senderKey: `name:${normalizeName(displayName)}`,
+  };
+}
+
+function canonicalizeSender(sender) {
+  if (sender.senderType !== "name") return sender;
+  const phone = MERGED_NAME_PHONE_MAPPINGS[normalizeName(sender.displayName)] || "";
+  if (!phone) return sender;
+  return {
+    ...sender,
+    senderType: "phone",
+    phone,
+    senderKey: `phone:${phone}`,
   };
 }
 
@@ -667,7 +686,7 @@ function parseWhatsAppChat(text) {
     const mediaMatch = firstContentLine.match(mediaPattern);
     if (!mediaMatch || !message.hasSender || !message.sender.trim()) return;
 
-    const sender = identifySender(message.sender);
+    const sender = canonicalizeSender(identifySender(message.sender));
     const filename = mediaMatch[1];
     const mediaType = filename.toUpperCase().startsWith("VID-") ? "video" : "image";
     const mediaSequence = mediaType === "video" ? (videoSequence += 1) : (imageSequence += 1);
