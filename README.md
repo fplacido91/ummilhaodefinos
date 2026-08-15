@@ -26,6 +26,14 @@ python tools/merge_chat_log.py "WhatsApp Chat with Um Milhão de Finos.txt" nova
 
 A ferramenta encontra a última mensagem partilhada, acrescenta apenas o que vem depois e ignora blocos de mensagem duplicados. As ferramentas de preparação do arquivo não fazem parte da navegação pública. O chat, contactos e decisões são fontes de trabalho do administrador; não publique estes ficheiros sem confirmar que a exposição é aceitável.
 
+Para cruzar a lista atual de membros com a contagem, o último fino e os eventos de entrada no grupo, gere o relatório de membros com a exportação CSV mais recente:
+
+```powershell
+python tools/generate_member_report.py wa_list_1786731817120.csv -o people-to-delete.csv
+```
+
+Por defeito, o relatório inclui membros atuais com até 3 finos (incluindo zero), para revisão antes de remover alguém. As colunas `data_primeira_entrada` e `data_ultima_entrada` são extraídas dos eventos `joined`/`added` do chat. Entradas de hoje ou de ontem ficam marcadas como **SIM — não remover automaticamente**; quando não existe um evento inequívoco, a linha fica marcada para revisão manual. O relatório conta apenas media aceite pelas mesmas regras de deduplicação e revisão usadas pelo site.
+
 ## Regras de importação
 
 A implementação em `app.js` trata os casos da exportação do WhatsApp que alteram a contagem:
