@@ -1748,6 +1748,7 @@ function renderOverview() {
   const latestDayRows = latestDayKey ? getDayRows(latestDayKey) : [];
   const latestDayTotal = latestDayRows.reduce((sum, row) => sum + row.count, 0);
   const dailyWinnerRankings = getDailyWinnerRankings();
+  const dailyHighscores = getDailyHighscores();
   const latestWeekKey = getLatestWeekKey();
   const weeklyWinners = getWeeklyWinners(latestWeekKey);
   const currentStreaks = getStreakRankings(latestDayKey).slice(0, 10);
@@ -1833,6 +1834,10 @@ function renderOverview() {
       <section class="panel-card ranking-panel">
         <div class="section-card-header"><div><p class="eyebrow">Classificação acumulada</p><h2>Ranking total · top 10</h2></div><button class="view-all" data-action="navigate" data-view="participants">Todos os participantes ${icon("arrow-right")}</button></div>
         <div class="ranking-list">${rankingRowsHtml(totalRanking, maxTotalCount)}</div>
+      </section>
+      <section class="panel-card ranking-panel">
+        <div class="section-card-header"><div><p class="eyebrow">Recordes de um período</p><h2>Daily highscores · top 10</h2></div><span class="table-eyebrow">08:00 → 08:00</span></div>
+        <div class="score-list">${scoreRowsHtml(dailyHighscores, "daily")}</div>
       </section>
       <section class="panel-card ranking-panel">
         <div class="section-card-header"><div><p class="eyebrow">Primeiros lugares acumulados</p><h2>Top 10 Daily winners</h2></div><span class="table-eyebrow">1.º · 08:00 → 08:00</span></div>

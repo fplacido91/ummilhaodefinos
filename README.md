@@ -54,7 +54,7 @@ A implementação em `app.js` trata os casos da exportação do WhatsApp que alt
 
 ## Vistas
 
-- **Visão geral** — total acumulado, progresso até 1 000 000, verificação pós-importação, top 10 total, top 10 de vitórias diárias e vencedores da semana atual.
+- **Visão geral** — total acumulado, progresso até 1 000 000, verificação pós-importação, top 10 total, recordes de um período, top 10 de vitórias diárias e vencedores da semana atual.
 - **Estatísticas** — mapa de calor dia do período × hora, distribuição por hora do dia, totais semanais, calendário, participação, recordes globais e projeção da data do milhão com base na média dos últimos períodos.
 - **Janela diária** — classificação selecionável por períodos das 08:00 às 08:00.
 - **Janela semanal** — classificação selecionável por semanas de segunda-feira às 08:00 até à segunda-feira seguinte às 08:00; abre por defeito na semana anterior à mais recente quando existe.
