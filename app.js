@@ -99,6 +99,8 @@ const PUBLIC_PHONE_NICKNAMES = Object.freeze({
   "964326187": "O Mestre",
   "351968958207": "CRaúl7 do fino",
   "968958207": "CRaúl7 do fino",
+  "351967125526": "Vicente",
+  "967125526": "Vicente",
 });
 const PHONE_COUNTRY_CODES = Object.freeze([
   "971", "420", "355", "353", "352", "351", "244", "258", "55", "54", "44", "43", "41", "39", "34", "1",
