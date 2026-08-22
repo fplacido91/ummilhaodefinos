@@ -107,8 +107,8 @@ const PUBLIC_PHONE_NICKNAMES = Object.freeze({
   "911131245": "Martin Garrix",
   "351918805404": "Requinte",
   "918805404": "Requinte",
-  "351963950525": "Bêbado de elite",
-  "963950525": "Bêbado de elite",
+  "351963950525": "Bêbado de Elite",
+  "963950525": "Bêbado de Elite",
   "351918314047": "Xau Laura",
   "918314047": "Xau Laura",
 });
