@@ -30,6 +30,7 @@ const KNOWN_NAME_PHONE_MAPPINGS = Object.freeze({
 // named sender later. Canonicalize both forms before counting or deduplicating.
 const MERGED_NAME_PHONE_MAPPINGS = Object.freeze({
   "joao mendonca volkanov": "351910466263",
+  "gui carrington": "351913946554",
 });
 const PUBLIC_NAME_ALIASES = Object.freeze({
   "joao mendonca volkanov": "VOLKANOV",
