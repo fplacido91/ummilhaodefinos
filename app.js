@@ -33,6 +33,7 @@ const MERGED_NAME_PHONE_MAPPINGS = Object.freeze({
 });
 const PUBLIC_NAME_ALIASES = Object.freeze({
   "joao mendonca volkanov": "VOLKANOV",
+  "gui carrington": "Guiceps",
 });
 const PUBLIC_PHONE_NICKNAMES = Object.freeze({
   "351913946554": "Guiceps",
