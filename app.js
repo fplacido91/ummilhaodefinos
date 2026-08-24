@@ -1234,6 +1234,24 @@ function getDailyTotalRows() {
     .sort((first, second) => first.dayKey.localeCompare(second.dayKey));
 }
 
+function getWeeklyTotalRows() {
+  const totals = new Map();
+  appState.records.forEach((record) => {
+    const dayKey = record.dayKey && record.dayKey !== "unknown" ? record.dayKey : dailyBucketKey(record.timestamp);
+    const weekKey = weekStartKey(dayKey);
+    if (weekKey === "unknown") return;
+    totals.set(weekKey, (totals.get(weekKey) || 0) + 1);
+  });
+
+  const rows = [...totals.entries()]
+    .map(([weekKey, count]) => ({ weekKey, count }))
+    .sort((first, second) => first.weekKey.localeCompare(second.weekKey));
+
+  // The export starts part-way through its first weekly period. Start the
+  // chart at the first complete Monday 08:00 → Monday 08:00 week.
+  return rows.slice(1);
+}
+
 function getLatestDayKey() {
   const latestRecordDayKey = getDailyTotalRows().at(-1)?.dayKey || null;
   if (latestRecordDayKey) return latestRecordDayKey;
@@ -1622,6 +1640,36 @@ function renderDailyTotalsChart(rows) {
   return `<div class="history-chart"><svg viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="history-chart-title history-chart-description"><title id="history-chart-title">Total diário de finos</title><desc id="history-chart-description">Evolução do total de finos por período de 08:00 a 08:00.</desc>${grid}<path class="history-area" d="${areaPath}"></path><polyline class="history-line" points="${points.join(" ")}"></polyline>${dots}${labels}</svg></div>`;
 }
 
+function renderWeeklyTotalsChart(rows) {
+  if (!rows.length) return `<div class="chart-empty">Ainda não há semanas completas suficientes para desenhar o ritmo semanal.</div>`;
+
+  const width = 1000;
+  const height = 300;
+  const left = 52;
+  const right = 22;
+  const top = 20;
+  const bottom = 48;
+  const chartWidth = width - left - right;
+  const chartHeight = height - top - bottom;
+  const max = Math.max(...rows.map((row) => row.count), 1);
+  const x = (index) => left + (rows.length === 1 ? chartWidth / 2 : (index / (rows.length - 1)) * chartWidth);
+  const y = (count) => top + chartHeight - (count / max) * chartHeight;
+  const points = rows.map((row, index) => `${x(index).toFixed(2)},${y(row.count).toFixed(2)}`);
+  const areaPath = `M ${x(0).toFixed(2)} ${top + chartHeight} L ${points.join(" L ")} L ${x(rows.length - 1).toFixed(2)} ${top + chartHeight} Z`;
+  const tickCount = 4;
+  const grid = Array.from({ length: tickCount + 1 }, (_, index) => {
+    const value = Math.round(max * (1 - index / tickCount));
+    const lineY = y(value).toFixed(2);
+    return `<line class="history-grid-line" x1="${left}" y1="${lineY}" x2="${width - right}" y2="${lineY}"></line><text class="history-axis-label" x="${left - 10}" y="${Number(lineY) + 3}" text-anchor="end">${escapeHtml(formatNumber(value))}</text>`;
+  }).join("");
+  const labelCount = Math.min(rows.length, 6);
+  const labelIndexes = [...new Set(Array.from({ length: labelCount }, (_, index) => Math.round(index * (rows.length - 1) / Math.max(labelCount - 1, 1))))];
+  const labels = labelIndexes.map((index) => `<text class="history-x-label" x="${x(index).toFixed(2)}" y="${height - 16}" text-anchor="middle">${escapeHtml(formatShortDate(dateFromDayKey(rows[index].weekKey)))}</text>`).join("");
+  const dots = rows.map((row, index) => `<circle class="history-point" cx="${x(index).toFixed(2)}" cy="${y(row.count).toFixed(2)}" r="${rows.length > 18 ? 2.2 : 3.5}"><title>${escapeHtml(formatWeekPeriodLabel(row.weekKey))}: ${escapeHtml(formatNumber(row.count))} finos</title></circle>`).join("");
+
+  return `<div class="history-chart weekly-history-chart"><svg viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="weekly-history-chart-title weekly-history-chart-description"><title id="weekly-history-chart-title">Total semanal de finos</title><desc id="weekly-history-chart-description">Evolução do total de finos por semana, de segunda-feira às 08:00 até à segunda-feira seguinte às 08:00.</desc>${grid}<path class="history-area" d="${areaPath}"></path><polyline class="history-line" points="${points.join(" ")}"></polyline>${dots}${labels}</svg></div>`;
+}
+
 function statHeatLevel(value, maximum, levels = 5) {
   if (!value || !maximum) return 0;
   return Math.min(levels, Math.max(1, Math.ceil((value / maximum) * levels)));
@@ -1759,6 +1807,7 @@ function renderOverview() {
   const progress = Math.min(100, (total / TARGET_BEERS) * 100);
   const totalRanking = appState.participants.slice(0, 10).map((participant) => ({ participant, count: participant.count }));
   const dailyRows = getDailyTotalRows();
+  const weeklyRows = getWeeklyTotalRows();
   const dayKeys = dailyRows.map((row) => row.dayKey);
   const latestDayKey = getLatestDayKey();
   const latestDayRows = latestDayKey ? getDayRows(latestDayKey) : [];

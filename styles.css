@@ -1024,6 +1024,22 @@ svg {
   overflow: hidden;
 }
 
+.history-panel + .history-panel {
+  margin-top: 18px;
+}
+
+.weekly-history-panel .history-area {
+  fill: rgba(200, 94, 66, 0.13);
+}
+
+.weekly-history-panel .history-line {
+  stroke: var(--rust);
+}
+
+.weekly-history-panel .history-point {
+  stroke: var(--amber);
+}
+
 .history-chart {
   padding: 18px 23px 12px;
 }
