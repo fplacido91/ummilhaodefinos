@@ -1895,6 +1895,11 @@ function renderOverview() {
       <div class="section-card-header"><div><p class="eyebrow">Ritmo do arquivo</p><h2>Total diário de finos</h2></div><span class="table-eyebrow">${escapeHtml(formatBucketLabel(latestDayKey || "unknown"))}</span></div>
       ${renderDailyTotalsChart(dailyRows)}
     </section>
+    <section class="panel-card history-panel weekly-history-panel">
+      <div class="section-card-header"><div><p class="eyebrow">Ritmo semanal</p><h2>Total semanal de finos</h2></div><span class="table-eyebrow">segunda 08:00 → segunda 08:00</span></div>
+      ${renderWeeklyTotalsChart(weeklyRows)}
+      <div class="panel-note">A primeira semana parcial foi omitida. A semana mais recente pode ainda estar em curso.</div>
+    </section>
     <div class="dashboard-lower dashboard-highlights">
       <section class="panel-card ranking-panel">
         <div class="section-card-header"><div><p class="eyebrow">Classificação acumulada</p><h2>Ranking total · top 10</h2></div><button class="view-all" data-action="navigate" data-view="participants">Todos os participantes ${icon("arrow-right")}</button></div>
