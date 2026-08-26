@@ -117,6 +117,8 @@ const PUBLIC_PHONE_NICKNAMES = Object.freeze({
   "916856965": "Nutri Pires",
   "351924036496": "William",
   "924036496": "William",
+  "351916502812": "Eu é mais vinho",
+  "916502812": "Eu é mais vinho",
 });
 const PHONE_COUNTRY_CODES = Object.freeze([
   "971", "420", "355", "353", "352", "351", "244", "258", "55", "54", "44", "43", "41", "39", "34", "1",
