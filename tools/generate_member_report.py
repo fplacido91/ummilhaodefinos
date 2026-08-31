@@ -57,6 +57,7 @@ KNOWN_NAME_PHONE_MAPPINGS = {
 }
 MERGED_NAME_PHONE_MAPPINGS = {
     "joao mendonca volkanov": "351910466263",
+    "alex milhao finos": "351963950525",
 }
 
 

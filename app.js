@@ -31,6 +31,7 @@ const KNOWN_NAME_PHONE_MAPPINGS = Object.freeze({
 const MERGED_NAME_PHONE_MAPPINGS = Object.freeze({
   "joao mendonca volkanov": "351910466263",
   "gui carrington": "351913946554",
+  "alex milhao finos": "351963950525",
 });
 const PUBLIC_NAME_ALIASES = Object.freeze({
   "joao mendonca volkanov": "VOLKANOV",
