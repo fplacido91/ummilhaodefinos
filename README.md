@@ -16,7 +16,7 @@ Depois abra <http://localhost:4173>. Ao iniciar, a aplicação carrega automatic
 - `contacts.csv`
 - `review-decisions.json`
 
-As imagens são carregadas diretamente do DigitalOcean Spaces através do valor de `meta[name="media-base-url"]` em `index.html`.
+As imagens são carregadas diretamente do DigitalOcean Spaces através do valor de `meta[name="media-base-url"]` em `index.html`. O resultado do parsing do chat é guardado no IndexedDB do navegador e invalidado automaticamente quando o conteúdo ou a versão do parser muda.
 
 Para atualizar o registo de produção, preserve o histórico do chat e faça merge da nova exportação incremental antes de recarregar a página:
 

@@ -12,6 +12,11 @@ const REVIEW_DECISIONS_MIGRATION_KEY = "um-milhao-de-finos-review-decisions-file
 const REPOSITORY_CHAT_FILE = "WhatsApp Chat with Um Milhão de Finos.txt";
 const REPOSITORY_CONTACTS_FILE = "contacts.csv";
 const REPOSITORY_REVIEW_FILE = "review-decisions.json";
+const PARSED_CHAT_CACHE_DB = "um-milhao-de-finos-cache";
+const PARSED_CHAT_CACHE_STORE = "repository-chat";
+const PARSED_CHAT_CACHE_KEY = "latest";
+// Bump this when the parser or its canonicalization rules change.
+const PARSED_CHAT_CACHE_VERSION = 1;
 const MEDIA_BASE_URL = document.querySelector?.('meta[name="media-base-url"]')?.content || "";
 const PRIVATE_ADMIN = document.documentElement.dataset.siteMode === "admin";
 const REVIEW_PAGE_SIZE = 48;
@@ -1114,7 +1119,7 @@ function refreshDerived() {
   if (appState.selectedParticipant && !appState.participants.some((person) => person.id === appState.selectedParticipant)) {
     appState.selectedParticipant = null;
   }
-  streakAnalyticsCache = null;
+  resetDerivedCaches();
 }
 
 function buildDemoMessages() {
@@ -1130,13 +1135,16 @@ function getParticipantById(id) {
 }
 
 function getDayRows(dayKey) {
-  return appState.participants
+  if (derivedCache.dayRows.has(dayKey)) return derivedCache.dayRows.get(dayKey);
+  const rows = appState.participants
     .map((participant) => ({
       participant,
       count: participant.records.filter((record) => record.dayKey === dayKey).length,
     }))
     .filter((row) => row.count > 0)
     .sort((first, second) => second.count - first.count || publicParticipantName(first.participant).localeCompare(publicParticipantName(second.participant)));
+  derivedCache.dayRows.set(dayKey, rows);
+  return rows;
 }
 
 function getDailyWinners(dayKey = getLatestDayKey(), limit = 10) {
@@ -1191,6 +1199,7 @@ function getWeeklyPeriodKeys() {
 }
 
 function getParticipantWeekTotalsMap(participant) {
+  if (derivedCache.participantWeekTotals.has(participant)) return derivedCache.participantWeekTotals.get(participant);
   const totals = new Map();
   participant.records.forEach((record) => {
     const dayKey = record.dayKey && record.dayKey !== "unknown" ? record.dayKey : dailyBucketKey(record.timestamp);
@@ -1198,12 +1207,14 @@ function getParticipantWeekTotalsMap(participant) {
     if (weekKey === "unknown") return;
     totals.set(weekKey, (totals.get(weekKey) || 0) + 1);
   });
+  derivedCache.participantWeekTotals.set(participant, totals);
   return totals;
 }
 
 function getWeekRows(weekKey) {
   if (!weekKey || weekKey === "unknown") return [];
-  return appState.participants
+  if (derivedCache.weekRows.has(weekKey)) return derivedCache.weekRows.get(weekKey);
+  const rows = appState.participants
     .map((participant) => ({
       participant,
       weekKey,
@@ -1211,6 +1222,8 @@ function getWeekRows(weekKey) {
     }))
     .filter((row) => row.count > 0)
     .sort((first, second) => second.count - first.count || publicParticipantName(first.participant).localeCompare(publicParticipantName(second.participant)));
+  derivedCache.weekRows.set(weekKey, rows);
+  return rows;
 }
 
 function getWeeklyWinners(weekKey = getLatestWeekKey(), limit = 10) {
@@ -1233,17 +1246,21 @@ function getLatestDataTimestamp() {
 }
 
 function getDailyTotalRows() {
+  if (derivedCache.dailyTotalRows) return derivedCache.dailyTotalRows;
   const totals = new Map();
   appState.records.forEach((record) => {
     if (record.dayKey === "unknown") return;
     totals.set(record.dayKey, (totals.get(record.dayKey) || 0) + 1);
   });
-  return [...totals.entries()]
+  const rows = [...totals.entries()]
     .map(([dayKey, count]) => ({ dayKey, count }))
     .sort((first, second) => first.dayKey.localeCompare(second.dayKey));
+  derivedCache.dailyTotalRows = rows;
+  return rows;
 }
 
 function getWeeklyTotalRows() {
+  if (derivedCache.weeklyTotalRows) return derivedCache.weeklyTotalRows;
   const totals = new Map();
   appState.records.forEach((record) => {
     const dayKey = record.dayKey && record.dayKey !== "unknown" ? record.dayKey : dailyBucketKey(record.timestamp);
@@ -1258,7 +1275,8 @@ function getWeeklyTotalRows() {
 
   // The export starts part-way through its first weekly period. Start the
   // chart at the first complete Monday 08:00 → Monday 08:00 week.
-  return rows.slice(1);
+  derivedCache.weeklyTotalRows = rows.slice(1);
+  return derivedCache.weeklyTotalRows;
 }
 
 function getLatestDayKey() {
@@ -1301,8 +1319,12 @@ function formatWeekPeriodLabel(weekKey) {
 }
 
 function getGlobalStats() {
+  if (derivedCache.globalStats !== undefined) return derivedCache.globalStats;
   const records = appState.records.filter((record) => record.timestamp instanceof Date && !Number.isNaN(record.timestamp.getTime()));
-  if (!records.length) return null;
+  if (!records.length) {
+    derivedCache.globalStats = null;
+    return null;
+  }
 
   const dayCounts = new Map();
   const dayParticipants = new Map();
@@ -1336,7 +1358,10 @@ function getGlobalStats() {
   });
 
   const activeDayKeys = [...dayCounts.keys()].sort();
-  if (!activeDayKeys.length) return null;
+  if (!activeDayKeys.length) {
+    derivedCache.globalStats = null;
+    return null;
+  }
   const firstDayKey = activeDayKeys[0];
   const latestDayKey = activeDayKeys.at(-1);
   const firstDate = dateFromDayKey(firstDayKey);
@@ -1438,7 +1463,7 @@ function getGlobalStats() {
     previousDayKey = row.dayKey;
   });
 
-  return {
+  const stats = {
     total,
     records,
     firstDayKey,
@@ -1479,14 +1504,18 @@ function getGlobalStats() {
       pendingDuplicateCount: appState.stats.pendingDuplicateCount || 0,
     },
   };
+  derivedCache.globalStats = stats;
+  return stats;
 }
 
 function getParticipantDayTotalsMap(participant) {
+  if (derivedCache.participantDayTotals.has(participant)) return derivedCache.participantDayTotals.get(participant);
   const totals = new Map();
   participant.records.forEach((record) => {
     if (record.dayKey === "unknown") return;
     totals.set(record.dayKey, (totals.get(record.dayKey) || 0) + 1);
   });
+  derivedCache.participantDayTotals.set(participant, totals);
   return totals;
 }
 
@@ -2307,14 +2336,19 @@ function renderViewState() {
 function renderAll() {
   renderViewState();
   renderTopbarAndSidebar();
-  renderOverview();
-  renderStats();
-  renderDaily();
-  renderWeekly();
-  renderParticipants();
-  if (appState.currentView === "audit") renderReview();
-  renderImportsStatus();
-  if (appState.currentView === "detail") renderDetail();
+
+  // The other views are rendered when opened. Several of them scan and sort
+  // the full ledger, so rendering all hidden views makes every navigation and
+  // repository refresh pay the cost repeatedly.
+  if (appState.currentView === "overview") renderOverview();
+  else if (appState.currentView === "stats") renderStats();
+  else if (appState.currentView === "daily") renderDaily();
+  else if (appState.currentView === "weekly") renderWeekly();
+  else if (appState.currentView === "participants") renderParticipants();
+  else if (appState.currentView === "audit") renderReview();
+  else if (appState.currentView === "imports") renderImportsStatus();
+  else if (appState.currentView === "detail") renderDetail();
+  else renderOverview();
 }
 
 function navigate(view) {
@@ -2385,6 +2419,28 @@ function saveMappings() {
 let persistAppStateTimer = null;
 let reviewMediaObserver = null;
 let streakAnalyticsCache = null;
+let derivedCache = {
+  dayRows: new Map(),
+  weekRows: new Map(),
+  participantDayTotals: new Map(),
+  participantWeekTotals: new Map(),
+  dailyTotalRows: null,
+  weeklyTotalRows: null,
+  globalStats: undefined,
+};
+
+function resetDerivedCaches() {
+  derivedCache = {
+    dayRows: new Map(),
+    weekRows: new Map(),
+    participantDayTotals: new Map(),
+    participantWeekTotals: new Map(),
+    dailyTotalRows: null,
+    weeklyTotalRows: null,
+    globalStats: undefined,
+  };
+  streakAnalyticsCache = null;
+}
 
 function schedulePersistAppState() {
   window.clearTimeout(persistAppStateTimer);
@@ -2553,12 +2609,157 @@ async function importContactsFile(file) {
   }
 }
 
+function getChatSourceKey(text) {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${PARSED_CHAT_CACHE_VERSION}:${text.length}:${hash >>> 0}`;
+}
+
+function openParsedChatCache() {
+  if (!window.indexedDB) return Promise.resolve(null);
+
+  return new Promise((resolve, reject) => {
+    let request;
+    try {
+      request = window.indexedDB.open(PARSED_CHAT_CACHE_DB, 1);
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(PARSED_CHAT_CACHE_STORE)) {
+        database.createObjectStore(PARSED_CHAT_CACHE_STORE, { keyPath: "key" });
+      }
+    };
+    request.onsuccess = () => {
+      const database = request.result;
+      database.onversionchange = () => database.close();
+      resolve(database);
+    };
+    request.onerror = () => reject(request.error || new Error("Unable to open parsed chat cache"));
+  });
+}
+
+function readParsedChatCache(sourceKey) {
+  return openParsedChatCache()
+    .then((database) => {
+      if (!database) return null;
+      return new Promise((resolve) => {
+        let result = null;
+        let finished = false;
+        const finish = (value) => {
+          if (finished) return;
+          finished = true;
+          database.close();
+          resolve(value);
+        };
+
+        try {
+          const transaction = database.transaction(PARSED_CHAT_CACHE_STORE, "readonly");
+          const request = transaction.objectStore(PARSED_CHAT_CACHE_STORE).get(PARSED_CHAT_CACHE_KEY);
+          request.onsuccess = () => {
+            const entry = request.result;
+            if (
+              entry?.version === PARSED_CHAT_CACHE_VERSION &&
+              entry.sourceKey === sourceKey &&
+              Array.isArray(entry.photoRecords)
+            ) {
+              result = entry;
+            }
+          };
+          transaction.oncomplete = () => finish(result);
+          transaction.onerror = () => finish(null);
+          transaction.onabort = () => finish(null);
+        } catch {
+          finish(null);
+        }
+      });
+    })
+    .catch(() => null);
+}
+
+function writeParsedChatCache(sourceKey, parsed) {
+  return openParsedChatCache()
+    .then((database) => {
+      if (!database) return;
+      return new Promise((resolve) => {
+        let finished = false;
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          database.close();
+          resolve();
+        };
+
+        try {
+          const transaction = database.transaction(PARSED_CHAT_CACHE_STORE, "readwrite");
+          transaction.objectStore(PARSED_CHAT_CACHE_STORE).put({
+            key: PARSED_CHAT_CACHE_KEY,
+            version: PARSED_CHAT_CACHE_VERSION,
+            sourceKey,
+            latestTimestamp: parsed.latestTimestamp,
+            rawPhotoCount: parsed.rawPhotoCount,
+            rawImageCount: parsed.rawImageCount,
+            rawVideoCount: parsed.rawVideoCount,
+            omittedMediaCount: parsed.omittedMediaCount,
+            dedupedCount: parsed.dedupedCount,
+            duplicateCount: parsed.duplicateCount,
+            photoRecords: parsed.photoRecords,
+          });
+          transaction.oncomplete = finish;
+          transaction.onerror = finish;
+          transaction.onabort = finish;
+        } catch {
+          finish();
+        }
+      });
+    })
+    .catch(() => undefined);
+}
+
+function restoreParsedChatCache(entry) {
+  const photoRecords = entry.photoRecords.map((record) => ({
+    ...record,
+    timestamp: record.timestamp ? new Date(record.timestamp) : null,
+  }));
+  const records = photoRecords.filter((record) => !record.duplicateCandidate);
+  return {
+    messages: [],
+    latestTimestamp: entry.latestTimestamp ? new Date(entry.latestTimestamp) : null,
+    records,
+    photoRecords,
+    rawPhotoCount: Number(entry.rawPhotoCount ?? photoRecords.length),
+    rawImageCount: Number(entry.rawImageCount ?? 0),
+    rawVideoCount: Number(entry.rawVideoCount ?? 0),
+    omittedMediaCount: Number(entry.omittedMediaCount ?? 0),
+    dedupedCount: Number(entry.dedupedCount ?? records.length),
+    duplicateCount: Number(entry.duplicateCount ?? 0),
+  };
+}
+
+async function parseRepositoryChat(text) {
+  const sourceKey = getChatSourceKey(text);
+  const cached = await readParsedChatCache(sourceKey);
+  if (cached) return restoreParsedChatCache(cached);
+
+  const parsed = parseWhatsAppChat(text);
+  void writeParsedChatCache(sourceKey, parsed);
+  return parsed;
+}
+
 async function loadRepositorySources() {
   try {
     const [chatResponse, contactsResponse, reviewResponse] = await Promise.all([
-      fetch(encodeURI(REPOSITORY_CHAT_FILE), { cache: "no-store" }),
-      fetch(REPOSITORY_CONTACTS_FILE, { cache: "no-store" }),
-      fetch(REPOSITORY_REVIEW_FILE, { cache: "no-store" }),
+      // Let the browser/CDN reuse unchanged repository sources. The parsed
+      // chat cache below still invalidates itself when the source changes.
+      fetch(encodeURI(REPOSITORY_CHAT_FILE), { cache: "default" }),
+      fetch(REPOSITORY_CONTACTS_FILE, { cache: "default" }),
+      fetch(REPOSITORY_REVIEW_FILE, { cache: "default" }),
     ]);
     if (!chatResponse.ok) return;
 
@@ -2574,7 +2775,7 @@ async function loadRepositorySources() {
     migrateFilenameDuplicateDecisions();
 
     const chatText = await chatResponse.text();
-    const parsed = parseWhatsAppChat(chatText);
+    const parsed = await parseRepositoryChat(chatText);
     appState.mode = "imported";
     appState.photoCandidates = parsed.photoRecords;
     appState.records = parsed.records;
