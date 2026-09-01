@@ -122,6 +122,8 @@ const PUBLIC_PHONE_NICKNAMES = Object.freeze({
   "916502812": "Eu é mais vinho",
   "351934163415": "Zé do Estouro",
   "934163415": "Zé do Estouro",
+  "351926246690": "Bock&Roll",
+  "926246690": "Bock&Roll",
 });
 const PHONE_COUNTRY_CODES = Object.freeze([
   "971", "420", "355", "353", "352", "351", "244", "258", "55", "54", "44", "43", "41", "39", "34", "1",
